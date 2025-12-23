@@ -1,15 +1,17 @@
--- EnemyStatsDataStore.server.lua
--- Universal DataStore for enemy stats (Health, Experience, Money, Drops)
+-- EnemyStatsDataStore.lua
+-- Enemy stats management - now delegates saving to UnifiedDataStoreManager
 
 local DataStoreService = game:GetService("DataStoreService")
-local enemyStatsStore = DataStoreService:GetDataStore("EnemyStats")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
 
 -- Example default stats for enemies
 local DEFAULT_ENEMY_STATS = {
     ["Gloop Crusher"] = {
         Health = 30,
         Attack = 1,
-        Experience = 10,
+        Experience = 1,
         Money = 1,
         Drops = {"SlimeBall", "GloopEssence","Twig"}
     },
@@ -25,18 +27,15 @@ local DEFAULT_ENEMY_STATS = {
 
 -- Save or update stats for an enemy type
 local function saveEnemyStats(enemyName, stats)
-    pcall(function()
-        enemyStatsStore:SetAsync(enemyName, stats)
-    end)
+    -- Delegate to UnifiedDataStoreManager
+    UnifiedDataStoreManager.SaveEnemyStats(enemyName, stats)
 end
 
 -- Load stats for an enemy type (returns default if not found)
 local function loadEnemyStats(enemyName)
-    local stats
-    local success, err = pcall(function()
-        stats = enemyStatsStore:GetAsync(enemyName)
-    end)
-    if success and stats then
+    -- Delegate to UnifiedDataStoreManager
+    local stats = UnifiedDataStoreManager.LoadEnemyStats(enemyName)
+    if stats then
         return stats
     else
         return DEFAULT_ENEMY_STATS[enemyName]

@@ -12,6 +12,7 @@ pcall(function() PhysicsService:RegisterCollisionGroup("Players") end)
 -- Setup collision relationships for Coins (like Enemies)
 PhysicsService:CollisionGroupSetCollidable("Coins", "Coins", true)
 pcall(function() PhysicsService:CollisionGroupSetCollidable("Coins", "Enemies", false) end)
+pcall(function() PhysicsService:CollisionGroupSetCollidable("Enemies", "Enemies", false) end)
 pcall(function() PhysicsService:CollisionGroupSetCollidable("Coins", "Players", false) end)
 pcall(function() PhysicsService:CollisionGroupSetCollidable("Coins", "Env", true) end)
 
@@ -20,9 +21,7 @@ task.wait(0.1)
 local success, canCollide = pcall(function()
 	return PhysicsService:CollisionGroupsAreCollidable("Coins", "Players")
 end)
-if success then
-	print("[GloopCrusher] Coins-Players collision: " .. tostring(canCollide))
-else
+if not success then
 	warn("[GloopCrusher] Could not verify Coins-Players collision relationship")
 end
 
@@ -62,7 +61,7 @@ local function addCharacterPartsToCollisionGroup(character)
 	local function addCharacterPartsToGroup(obj)
 		if not obj then return end
 		if obj:IsA("BasePart") then
-			pcall(function() PhysicsService:CollisionGroupAddMember("Players", obj) end)
+			obj.CollisionGroup = "Players"
 		end
 		for _, child in ipairs(obj:GetChildren()) do addCharacterPartsToGroup(child) end
 	end
@@ -72,7 +71,7 @@ local function addCharacterPartsToCollisionGroup(character)
 	character.DescendantAdded:Connect(function(descendant)
 		if descendant:IsA("BasePart") then
 			task.wait(0.05) -- Small delay to ensure part is ready
-			pcall(function() PhysicsService:CollisionGroupAddMember("Players", descendant) end)
+			descendant.CollisionGroup = "Players"
 		end
 	end)
 end
@@ -144,6 +143,25 @@ function EnemiesManager.Start(model)
 
 	local statsStore = game:GetService("DataStoreService"):GetDataStore("PlayerStats")
 	local lastDamagedByPlayer = nil -- Track which player dealt damage to this enemy
+	local playerStatConnections = {} -- Store connections to player stat changes for cleanup
+	
+	-- Setup real-time listener for player stat changes
+	local function setupPlayerStatListener(player)
+		local userId = player.UserId
+		local stats = player:FindFirstChild("Stats")
+		if not stats then return end
+		
+		-- Listen to MaxHealth changes to update player's actual max capacity
+		local maxHealth = stats:FindFirstChild("MaxHealth")
+		if maxHealth and not playerStatConnections[userId] then
+			playerStatConnections[userId] = maxHealth.Changed:Connect(function(newMaxHealth)
+				-- When player allocates to MaxHealth, update our tracking
+				if not playerHP[userId] then
+					playerHP[userId] = newMaxHealth
+				end
+		end)
+		end
+	end
 	
 	-- Create enemy health bar BillboardGui
 	local function createEnemyHealthBar(enemyModel, maxHealth)
@@ -209,17 +227,17 @@ function EnemiesManager.Start(model)
 	local function getPlayerMaxHealth(player)
 		local userId, key = player.UserId, "Player_" .. player.UserId
 		local data; local success, err = pcall(function() data = statsStore:GetAsync(key) end)
-		if success and data and type(data["Health"]) == "number" and data["Health"] > 0 then
+		if success and data and type(data["MaxHealth"]) == "number" and data["MaxHealth"] > 0 then
 			updateStatsFolderFromData(player, data)
-			return data["Health"]
+			return data["MaxHealth"]
 		else
 			warn("[GloopCrusher] Could not load valid max health for player " .. player.Name .. ": " .. tostring(err))
 			pcall(function()
 				statsStore:UpdateAsync(key, function(old)
-					old = old or {}; old["Health"] = DEFAULT_MAX_HEALTH; return old
+					old = old or {}; old["MaxHealth"] = DEFAULT_MAX_HEALTH; return old
 				end)
 			end)
-			updateStatsFolderFromData(player, {Health = DEFAULT_MAX_HEALTH})
+			updateStatsFolderFromData(player, {MaxHealth = DEFAULT_MAX_HEALTH})
 			return DEFAULT_MAX_HEALTH
 		end
 	end
@@ -231,36 +249,33 @@ function EnemiesManager.Start(model)
 				local player = Players:GetPlayerFromCharacter(character)
 				if player then
 					local userId = player.UserId
+					-- Setup real-time listener for this player's stats if not already done
+					if not playerStatConnections[userId] then
+						setupPlayerStatListener(player)
+					end
 					if touchDebounce[userId] then return end
 					touchDebounce[userId] = true
 					task.delay(1, function() touchDebounce[userId] = nil end)
 					if not hitCooldowns[userId] or tick() - hitCooldowns[userId] > cooldown then
-						local maxHealth = getPlayerMaxHealth(player)
-						if not maxHealth then warn("[GloopCrusher] Max health not available for player " .. player.Name .. ", skipping damage."); return end
-						if not playerHP[userId] then playerHP[userId] = maxHealth end
-						if playerHP[userId] <= 0 then return end
-						playerHP[userId] = math.max(playerHP[userId] - damage, 0)
-						lastDamagedByPlayer = player -- Track who damaged this enemy
+						-- Always get current health from player's Stats folder (DataStore source of truth)
 						local statsFolder = player:FindFirstChild("Stats")
-						if statsFolder then
-							local healthValue = statsFolder:FindFirstChild("Health")
-							if healthValue and typeof(healthValue.Value) == "number" then healthValue.Value = playerHP[userId] end
-						end
+						if not statsFolder then return end
+						
+						local currentHealthValue = statsFolder:FindFirstChild("CurrentHealth")
+						local maxHealthValue = statsFolder:FindFirstChild("MaxHealth")
+						if not currentHealthValue or not maxHealthValue then return end
+						
+						-- Check if player is already dead
+						if currentHealthValue.Value <= 0 then return end
+						
+						-- Apply damage directly to the DataStore-synced CurrentHealth
+						currentHealthValue.Value = math.max(currentHealthValue.Value - damage, 0)
+						lastDamagedByPlayer = player -- Track who damaged this enemy
 						hitCooldowns[userId] = tick()
 						
-						if playerHP[userId] <= 0 then
+						-- If player died from this hit
+						if currentHealthValue.Value <= 0 then
 							if character then character:BreakJoints() end
-							local refreshedMax = getPlayerMaxHealth(player)
-							if refreshedMax then
-								task.wait(5)
-								playerHP[userId] = refreshedMax
-								if statsFolder then
-									local healthValue = statsFolder:FindFirstChild("Health")
-									if healthValue and typeof(healthValue.Value) == "number" then healthValue.Value = refreshedMax end
-								end
-							else
-								playerHP[userId] = nil
-							end
 						end
 					end
 				end
@@ -299,6 +314,8 @@ function EnemiesManager.Start(model)
 		enemyHealth.Value = maxEnemyHealth
 	end
 	
+	local isDead = false -- Flag to prevent damage after death
+	
 	-- Function to update health bar
 	local function updateEnemyHealthBar()
 		if not healthBarBillboard or not healthBarBillboard.Parent then return end
@@ -336,6 +353,9 @@ function EnemiesManager.Start(model)
 	
 	-- Update health bar when enemy health changes
 	enemyHealth.Changed:Connect(function(newHealth)
+		-- Ignore all health changes after enemy dies
+		if isDead then return end
+		
 		currentHealth = newHealth
 		updateEnemyHealthBar()
 		
@@ -425,10 +445,21 @@ function EnemiesManager.Start(model)
 
 	if humanoid then
 		humanoid.Died:Connect(function()
+			isDead = true -- Mark enemy as dead to prevent further damage
+			enemyHealth.Value = 0 -- Ensure health is 0
+			
 			-- Disconnect the damage connection so dead slime doesn't hurt players
 			if touchConnection then
 				touchConnection:Disconnect()
 			end
+			
+			-- Cleanup all player stat listeners
+			for userId, connection in pairs(playerStatConnections) do
+				if connection then
+					connection:Disconnect()
+				end
+			end
+			table.clear(playerStatConnections)
 			
 local parent, enemyName, respawnPosition = slime.Parent, slime.Name, defaultPosition
 		
@@ -444,78 +475,90 @@ local parent, enemyName, respawnPosition = slime.Parent, slime.Name, defaultPosi
 				if experienceValue then
 					experienceValue.Value = experienceValue.Value + enemyExperience
 					
-					-- Update datastore directly
-					local key = "Player_" .. player.UserId
-					pcall(function()
-						statsStore:UpdateAsync(key, function(data)
-							data = data or {}
-							data["Experience"] = (data["Experience"] or 0) + enemyExperience
-							return data
-						end)
-					end)
-					
-					print("[EnemiesManager] " .. player.Name .. " gained " .. enemyExperience .. " experience")
-				end
+					-- NO LONGER writing directly to DataStore on every XP gain
+					-- LevelSystem.server.lua will handle throttled saves when Experience changes
 			end
-		else
-			print("[EnemiesManager] No player dealt damage to " .. slime.Name .. " or no experience to award")
+		end
+	end
+	
+	local ServerStorage = game:GetService("ServerStorage")
+	local coinTemplate = ServerStorage:FindFirstChild("Coin")
+	
+	if coinTemplate then
+		-- Store template's original CFrame before cloning
+		local templateRoot = coinTemplate:FindFirstChild("HumanoidRootPart") or coinTemplate:FindFirstChild("PrimaryPart") or coinTemplate
+		local originalCFrame = templateRoot.CFrame
+		
+		local coin = coinTemplate:Clone()
+		coin.Parent = workspace
+		local coinRoot = coin:FindFirstChild("HumanoidRootPart") or coin:FindFirstChild("PrimaryPart") or coin
+		
+		-- Spawn coin at a default location (enemy position or player position if available)
+		if coinRoot and root then
+			local spawnPosition
+			if lastDamagedByPlayer and lastDamagedByPlayer.Character then
+				-- Spawn coin at player's position if player exists
+				local playerRoot = lastDamagedByPlayer.Character:FindFirstChild("HumanoidRootPart")
+				if playerRoot then
+					spawnPosition = Vector3.new(playerRoot.Position.X, root.Position.Y - 1, playerRoot.Position.Z)
+				else
+					-- Fallback: spawn at enemy position
+					spawnPosition = root.Position + Vector3.new(0, 2, 0)
+				end
+			else
+				-- No player damaged this enemy, spawn at enemy position
+				print("[EnemiesModule] No player dealt damage to " .. slime.Name .. ", spawning coin at enemy position")
+				spawnPosition = root.Position + Vector3.new(0, 2, 0)
+			end
+			
+			-- Apply spawn position while preserving original orientation using rotation vectors
+			coinRoot.CFrame = CFrame.fromMatrix(spawnPosition, originalCFrame.RightVector, originalCFrame.UpVector)
 		end
 		
-			local ServerStorage = game:GetService("ServerStorage")
-			local coinTemplate = ServerStorage:FindFirstChild("Coin")
-			
-			if coinTemplate then
-				local coin = coinTemplate:Clone()
-				coin.Parent = workspace
-				local coinRoot = coin:FindFirstChild("HumanoidRootPart") or coin:FindFirstChild("PrimaryPart") or coin
-				if coinRoot and root then
-					coinRoot.CFrame = CFrame.new(root.Position + Vector3.new(0, -1, 0))
-				end
-				
-				-- Anchor all coin parts
-				local function anchorCoinParts(obj)
-					if not obj then return end
-					if obj:IsA("BasePart") then
-						obj.Anchored = true
-					end
-					for _, child in ipairs(obj:GetChildren()) do anchorCoinParts(child) end
-				end
-				anchorCoinParts(coin)
-				
-				-- Apply coin collision group (same as enemies)
-				local COIN_GROUP = "Coins"
-				local function setCoinCollisionGroup(obj)
-					if not obj then return end
-					if obj:IsA("BasePart") then 
-						obj.CollisionGroup = COIN_GROUP
-						-- Don't set CanCollide to false - let collision groups handle it
-					end
-					for _, child in ipairs(obj:GetChildren()) do setCoinCollisionGroup(child) end
-				end
-				setCoinCollisionGroup(coin)
-				
-				-- Store coin value and mark as collectible item
-				local coinValueObj = coin:FindFirstChild("Value")
-				if not coinValueObj then
-					coinValueObj = Instance.new("IntValue")
-					coinValueObj.Name = "Value"
-					coinValueObj.Parent = coin
-				end
-				coinValueObj.Value = coinValue
-				
-				-- Tag coin so collection script knows to process it
-				local tag = Instance.new("StringValue")
-				tag.Name = "CoinType"
-				tag.Value = "EnemyDrop"
-				tag.Parent = coin
-				
-				-- Destroy coin after 30 seconds if not collected
-				task.delay(30, function()
-					if coin and coin.Parent then
-						coin:Destroy()
-					end
-				end)
+		-- Anchor all coin parts
+		local function anchorCoinParts(obj)
+			if not obj then return end
+			if obj:IsA("BasePart") then
+				obj.Anchored = true
 			end
+			for _, child in ipairs(obj:GetChildren()) do anchorCoinParts(child) end
+		end
+		anchorCoinParts(coin)
+		
+		-- Apply coin collision group (same as enemies)
+		local COIN_GROUP = "Coins"
+		local function setCoinCollisionGroup(obj)
+			if not obj then return end
+			if obj:IsA("BasePart") then 
+				obj.CollisionGroup = COIN_GROUP
+				-- Don't set CanCollide to false - let collision groups handle it
+			end
+			for _, child in ipairs(obj:GetChildren()) do setCoinCollisionGroup(child) end
+		end
+		setCoinCollisionGroup(coin)
+		
+		-- Store coin value and mark as collectible item
+		local coinValueObj = coin:FindFirstChild("Value")
+		if not coinValueObj then
+			coinValueObj = Instance.new("IntValue")
+			coinValueObj.Name = "Value"
+			coinValueObj.Parent = coin
+		end
+		coinValueObj.Value = coinValue
+		
+		-- Tag coin so collection script knows to process it
+		local tag = Instance.new("StringValue")
+		tag.Name = "CoinType"
+		tag.Value = "EnemyDrop"
+		tag.Parent = coin
+		
+		-- Destroy coin after 30 seconds if not collected
+		task.delay(30, function()
+			if coin and coin.Parent then
+				coin:Destroy()
+			end
+		end)
+	end
 			
 			-- Enable collision on all parts before breaking joints
 			local function enableCollisionRecursive(obj)
@@ -534,13 +577,14 @@ local parent, enemyName, respawnPosition = slime.Parent, slime.Name, defaultPosi
 			local function addToDeadEnemiesGroup(obj)
 				if not obj then return end
 				if obj:IsA("BasePart") then 
-					pcall(function() PhysicsService:CollisionGroupAddMember("DeadEnemies", obj) end)
+					obj.CollisionGroup = "DeadEnemies"
 				end
 				for _, child in ipairs(obj:GetChildren()) do addToDeadEnemiesGroup(child) end
 			end
 			addToDeadEnemiesGroup(slime)
-			
+			slime.Humanoid:Destroy()
 			slime:BreakJoints()
+
 			task.wait(2)
 			slime:Destroy()
 			task.wait(15)

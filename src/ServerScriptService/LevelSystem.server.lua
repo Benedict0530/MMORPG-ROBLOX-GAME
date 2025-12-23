@@ -1,23 +1,23 @@
 -- LevelSystem.server.lua
 -- Handles player leveling up based on experience
+-- All saves are delegated to UnifiedDataStoreManager
 
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
 local statsStore = DataStoreService:GetDataStore("PlayerStats")
 
--- Function to save level and experience to datastore
-local function saveLevelToDataStore(player, level, experience, neededExperience)
-	local key = "Player_" .. player.UserId
-	pcall(function()
-		statsStore:UpdateAsync(key, function(data)
-			data = data or {}
-			data["Level"] = level
-			data["Experience"] = experience
-			data["NeededExperience"] = neededExperience
-			return data
-		end)
-	end)
-	print("[LevelSystem] Saved to datastore: Level=" .. level .. ", Experience=" .. experience .. ", NeededExperience=" .. neededExperience)
+-- Throttle settings (managed by UnifiedDataStoreManager)
+local SAVE_THROTTLE_INTERVAL = 8 -- Save at most every 8 seconds to avoid DataStore queue overflow
+local lastSaveTime = {}
+local hasPendingExperienceSave = {}
+
+-- Function to save level and experience to datastore (throttled)
+local function saveLevelToDataStore(player, level, experience, neededExperience, reason)
+	-- Delegate to UnifiedDataStoreManager
+	UnifiedDataStoreManager.SaveLevelData(player, false)
 end
 
 -- Function to check if player should level up
@@ -38,17 +38,19 @@ local function checkLevelUp(player)
 		level.Value = level.Value + 1
 		experience.Value = experience.Value - neededExperience.Value
 		
-		-- Double the needed experience for next level
-		neededExperience.Value = neededExperience.Value * 2
+		neededExperience.Value = neededExperience.Value * 1.2
+		
+		-- Grant 3 stat points per level
+		local statPoints = stats:FindFirstChild("StatPoints")
+		if statPoints then
+			statPoints.Value = statPoints.Value + 3
+		end
 		
 		leveledUp = true
-		print("[LevelSystem] " .. player.Name .. " leveled up to " .. level.Value .. "! Next level needs " .. neededExperience.Value .. " experience.")
 	end
 	
-	-- Save to datastore if leveled up
-	if leveledUp then
-		saveLevelToDataStore(player, level.Value, experience.Value, neededExperience.Value)
-	end
+	-- Save to datastore (whether leveled up or just gained exp)
+	saveLevelToDataStore(player, level.Value, experience.Value, neededExperience.Value, leveledUp and " (Level Up)" or " (Experience Gain)")
 end
 
 -- Function to setup level monitoring for a player
@@ -67,14 +69,53 @@ end
 
 -- Monitor new players when they join
 Players.PlayerAdded:Connect(function(player)
-	-- Wait for Stats folder to be created
-	local stats = player:WaitForChild("Stats", 5)
-	if stats then
+	-- Use task.spawn to ensure this doesn't block other PlayerAdded handlers
+	task.spawn(function()
+		-- Wait for PlayerDataStore to initialize stats folder
+		local ReplicatedStorage = game:GetService("ReplicatedStorage")
+		local playerSignalsFolder = ReplicatedStorage:WaitForChild("PlayerInitSignals", 10)
+		if not playerSignalsFolder then
+			warn("[LevelSystem] PlayerInitSignals folder not found for " .. player.Name)
+			return
+		end
+		
+		local signalName = "Player_" .. player.UserId
+		-- Wait for stats ready signal
+		local statsReadySignal = playerSignalsFolder:WaitForChild(signalName, 10)
+		if not statsReadySignal then
+			warn("[LevelSystem] Stats ready signal not found for " .. player.Name)
+			return
+		end
+		
+		-- Check if signal was already fired (check _Fired flag)
+		local firedFlag = statsReadySignal:FindFirstChild("_Fired")
+		if not firedFlag or not firedFlag.Value then
+			-- Wait for stats ready signal to fire
+			statsReadySignal.Event:Wait()
+		end
+		-- Stats are now ready
+		
+		-- Now setup level monitoring
 		setupLevelMonitoring(player)
-	end
+	end)
 end)
 
 -- Also setup for existing players when script loads
 for _, player in ipairs(Players:GetPlayers()) do
 	setupLevelMonitoring(player)
 end
+
+-- Periodic check: Save pending experience every second if needed (and throttle allows)
+game:GetService("RunService").Heartbeat:Connect(function()
+	-- All pending changes are now handled by UnifiedDataStoreManager
+end)
+
+-- Cleanup on player disconnect
+Players.PlayerRemoving:Connect(function(player)
+	-- Force save all data - delegated to UnifiedDataStoreManager
+	UnifiedDataStoreManager.SaveAll(player, true)
+	
+	-- Clear tracking tables
+	lastSaveTime[player.UserId] = nil
+	hasPendingExperienceSave[player.UserId] = nil
+end)

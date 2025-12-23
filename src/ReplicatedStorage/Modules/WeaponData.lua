@@ -4,7 +4,8 @@ local WeaponData = {}
 WeaponData.Weapons = {
     ["Twig"] = {
 		damage = 5,
-		speed = 0.6,
+		speed = 0.5,
+		imageId = "rbxassetid://127490675569703",
 		type = "One-Handed",
 		rarity = "Common"
 	},

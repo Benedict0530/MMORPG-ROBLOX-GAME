@@ -1,39 +1,34 @@
 local DataStoreService = game:GetService("DataStoreService")
-local weaponDataStore = DataStoreService:GetDataStore("WeaponData")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
+
 local WeaponData = require(ReplicatedStorage.Modules.WeaponData)
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
 
 local WeaponDataStore = {}
 
--- Save weapon data for a player
-function WeaponDataStore.SaveWeaponData(userId, weaponData)
-	local key = "Player_" .. userId
-	local success, err = pcall(function()
-		weaponDataStore:SetAsync(key, weaponData)
-	end)
-	if not success then
-		warn("[WeaponDataStore] Failed to save weapon data for user " .. userId .. ": " .. tostring(err))
-	end
-	return success
+-- Throttle settings for weapon data saves
+local SAVE_THROTTLE_INTERVAL = 8 -- Save at most every 8 seconds
+local lastSaveTime = {}
+local pendingWeaponSaves = {}
+
+-- Save weapon data for a player (throttled)
+function WeaponDataStore.SaveWeaponData(userId, weaponData, forceImmediate)
+	-- Delegate to UnifiedDataStoreManager
+	UnifiedDataStoreManager.SaveWeaponData(userId, weaponData, forceImmediate)
 end
 
 -- Load weapon data for a player
 function WeaponDataStore.LoadWeaponData(userId)
-	local key = "Player_" .. userId
-	local data
-	local success, err = pcall(function()
-		data = weaponDataStore:GetAsync(key)
-	end)
-	if not success then
-		warn("[WeaponDataStore] Failed to load weapon data for user " .. userId .. ": " .. tostring(err))
-		return nil
-	end
-	return data
+	-- Delegate to UnifiedDataStoreManager
+	return UnifiedDataStoreManager.LoadWeaponData(userId)
 end
 
 -- Update weapon data using UpdateAsync for safe concurrent modifications
 function WeaponDataStore.UpdateWeaponData(userId, updateFunction)
 	local key = "Player_" .. userId
+	local weaponDataStore = DataStoreService:GetDataStore("WeaponData")
 	local newData
 	local success, err = pcall(function()
 		newData = weaponDataStore:UpdateAsync(key, function(oldData)
@@ -49,14 +44,14 @@ end
 
 -- Delete weapon data for a player
 function WeaponDataStore.DeleteWeaponData(userId)
-	local key = "Player_" .. userId
-	local success, err = pcall(function()
-		weaponDataStore:RemoveAsync(key)
-	end)
-	if not success then
-		warn("[WeaponDataStore] Failed to delete weapon data for user " .. userId .. ": " .. tostring(err))
-	end
-	return success
+	-- Delegate to UnifiedDataStoreManager
+	UnifiedDataStoreManager.DeleteWeaponData(userId)
 end
+
+-- Cleanup on player disconnect
+Players.PlayerRemoving:Connect(function(player)
+	-- Force save delegated to UnifiedDataStoreManager
+	UnifiedDataStoreManager.SaveAll(player, true)
+end)
 
 return WeaponDataStore

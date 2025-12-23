@@ -12,6 +12,8 @@ local humanoid = character:WaitForChild("Humanoid")
 -- Attack cooldown tracking (matches server's cooldown logic)
 local lastAttackTimes = {} -- keys are tool instances
 local currentTool = nil
+local isSpaceHeld = false
+local attackLoopConnection = nil
 
 -- Track event connections for cleanup
 local childAddedConnection
@@ -82,19 +84,41 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			return
 		end
 		
-		-- Check attack cooldown (matches server's cooldown logic: 1 / speed)
-		local weaponName = currentTool.Name
-		local now = tick()
-		local lastAttack = lastAttackTimes[weaponName] or 0
-		local weaponStats = WeaponData.GetWeaponStats(weaponName)
-		local speed = weaponStats and weaponStats.speed or 1 -- Default speed if weapon not found
+		isSpaceHeld = true
 		
-		if (now - lastAttack) < (speed) then
-			print("[WeaponClient] Attack cooldown active for " .. weaponName)
-			return
+		-- Disconnect previous attack loop if any
+		if attackLoopConnection then
+			attackLoopConnection:Disconnect()
 		end
 		
-		lastAttackTimes[weaponName] = now
-		performAttack(currentTool)
+		-- Start attack loop while space is held
+		attackLoopConnection = game:GetService("RunService").Heartbeat:Connect(function()
+			if not isSpaceHeld or not currentTool then
+				return
+			end
+			
+			-- Check attack cooldown (matches server's cooldown logic: 1 / speed)
+			local weaponName = currentTool.Name
+			local now = tick()
+			local lastAttack = lastAttackTimes[weaponName] or 0
+			local weaponStats = WeaponData.GetWeaponStats(weaponName)
+			local speed = weaponStats and weaponStats.speed or 1 -- Default speed if weapon not found
+			
+			if (now - lastAttack) >= speed then
+				lastAttackTimes[weaponName] = now
+				performAttack(currentTool)
+			end
+		end)
+	end
+end)
+
+-- Handle spacebar release to stop attacking
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+	if input.KeyCode == Enum.KeyCode.Space then
+		isSpaceHeld = false
+		if attackLoopConnection then
+			attackLoopConnection:Disconnect()
+			attackLoopConnection = nil
+		end
 	end
 end)

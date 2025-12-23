@@ -1,0 +1,199 @@
+-- StatsManager.server.lua
+-- Manages player stat point allocation and upgrades
+-- All saves are delegated to UnifiedDataStoreManager
+
+local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
+local statsStore = DataStoreService:GetDataStore("PlayerStats")
+
+-- Throttle settings for stat saves (now managed by UnifiedDataStoreManager)
+local STAT_SAVE_THROTTLE = 8
+local lastStatSaveTime = {}
+local hasPendingStatSave = {}
+
+-- Create RemoteEvent for stat allocation
+local statsUpdateEvent = Instance.new("RemoteEvent")
+statsUpdateEvent.Name = "AllocateStatPoint"
+statsUpdateEvent.Parent = ReplicatedStorage
+
+-- Stat costs (points per increase)
+local STAT_COST = 1
+
+-- Maximum stat values (optional cap)
+local MAX_STAT_VALUES = {
+	MaxHealth = 500,
+	MaxMana = 100,
+	Attack = 100,
+	Defence = 100,
+	Dexterity = 300
+}
+
+local function saveStatsToDataStore(player, reason)
+	-- Delegate to UnifiedDataStoreManager
+	UnifiedDataStoreManager.SaveStats(player, false)
+end
+
+local function allocateStatPoint(player, statType)
+	local stats = player:FindFirstChild("Stats")
+	if not stats then
+		return false
+	end
+	
+	-- Check if statType is valid
+	if not (statType == "MaxHealth" or statType == "MaxMana" or statType == "Attack" or statType == "Defence" or statType == "Dexterity") then
+		return false
+	end
+	
+	local statPoints = stats:FindFirstChild("StatPoints")
+	local statValue = stats:FindFirstChild(statType)
+	
+	if not statPoints or not statValue then
+		return false
+	end
+	
+	-- Check if player has enough stat points
+	if statPoints.Value < STAT_COST then
+		return false
+	end
+	
+	-- Check if stat is at max
+	local maxValue = MAX_STAT_VALUES[statType]
+	if statValue.Value >= maxValue then
+		return false
+	end
+	
+	-- Allocate the point
+	statPoints.Value = statPoints.Value - STAT_COST
+	
+	-- Different increases for different stats
+	if statType == "MaxHealth" then
+		statValue.Value = statValue.Value + 10
+		local currentHealth = stats:FindFirstChild("CurrentHealth")
+		if currentHealth then
+			currentHealth.Value = currentHealth.Value + 10
+		end
+	elseif statType == "MaxMana" then
+		statValue.Value = statValue.Value + 5
+		local currentMana = stats:FindFirstChild("CurrentMana")
+		if currentMana then
+			currentMana.Value = currentMana.Value + 5
+		end
+	else
+		statValue.Value = statValue.Value + 1
+	end
+	
+	-- Save to DataStore (throttled)
+	saveStatsToDataStore(player, " (Stat allocation: " .. statType .. ")")
+	
+	return true
+end
+
+local function resetStats(player)
+	local stats = player:FindFirstChild("Stats")
+	if not stats then return false end
+	
+	local level = stats:FindFirstChild("Level")
+	if not level then return false end
+	
+	local resetPoints = stats:FindFirstChild("ResetPoints")
+	if not resetPoints then return false end
+	
+	-- Check if player has reset points available
+	if resetPoints.Value <= 0 then
+		return false
+	end
+	
+	-- Check if already at default stats to prevent giving extra points
+	local baseStats = {
+		MaxHealth = 50,
+		MaxMana = 5,
+		Attack = 1,
+		Defence = 1,
+		Dexterity = 1
+	}
+	
+	local isAtDefault = true
+	for statName, baseValue in pairs(baseStats) do
+		local stat = stats:FindFirstChild(statName)
+		if not stat or stat.Value ~= baseValue then
+			isAtDefault = false
+			break
+		end
+	end
+	
+	-- If already at default stats, just decrement reset points (don't add extra stat points)
+	if isAtDefault then
+		resetPoints.Value = resetPoints.Value - 1
+		saveStatsToDataStore(player, " (Stats Reset - Already at default - " .. resetPoints.Value .. " resets remaining)")
+		return true
+	end
+	
+	-- Decrement reset points
+	resetPoints.Value = resetPoints.Value - 1
+	
+	-- Calculate total stat points = 3 * level
+	local totalStatPoints = 3 * (level.Value or 1)
+	
+	-- Reset stats to base values
+	for statName, baseValue in pairs(baseStats) do
+		local stat = stats:FindFirstChild(statName)
+		if stat then
+			stat.Value = baseValue
+		end
+	end
+	
+	-- Also reset current health/mana to max
+	local currentHealth = stats:FindFirstChild("CurrentHealth")
+	local maxHealthStat = stats:FindFirstChild("MaxHealth")
+	if currentHealth and maxHealthStat then
+		currentHealth.Value = maxHealthStat.Value
+	end
+	
+	local currentMana = stats:FindFirstChild("CurrentMana")
+	local maxManaStat = stats:FindFirstChild("MaxMana")
+	if currentMana and maxManaStat then
+		currentMana.Value = maxManaStat.Value
+	end
+	
+	-- Add stat points to the total available (in case player got points from other sources)
+	local statPoints = stats:FindFirstChild("StatPoints")
+	if statPoints then
+		statPoints.Value = statPoints.Value + totalStatPoints
+	end
+	
+	-- Save to DataStore
+	saveStatsToDataStore(player, " (Stats Reset - " .. resetPoints.Value .. " resets remaining)")
+	
+	return true
+end
+
+-- Handle stat allocation requests from client
+statsUpdateEvent.OnServerEvent:Connect(function(player, action, statType)
+	if action == "Allocate" then
+		allocateStatPoint(player, statType)
+	elseif action == "Reset" then
+		resetStats(player)
+	end
+end)
+
+-- Periodically save pending stat changes
+local heartbeat = game:GetService("RunService").Heartbeat
+local lastHeartbeatSave = tick()
+heartbeat:Connect(function()
+	-- All pending changes are now handled by UnifiedDataStoreManager
+end)
+
+-- Cleanup on player leaving
+Players.PlayerRemoving:Connect(function(player)
+	-- Force save if pending - delegated to UnifiedDataStoreManager
+	UnifiedDataStoreManager.SaveAll(player, true)
+	
+	lastStatSaveTime[player.UserId] = nil
+	hasPendingStatSave[player.UserId] = nil
+end)
+
+print("[StatsManager] Stats Manager initialized. Listening for stat allocation requests...")

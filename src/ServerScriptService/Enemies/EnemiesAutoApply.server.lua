@@ -11,15 +11,13 @@ local EnemiesManager = require(script.Parent.EnemiesModule)
 
 local enemiesFolder = workspace:FindFirstChild("Enemies")
 if enemiesFolder then
-	print("[EnemiesAutoApply] Enemies folder found.")
+	-- Initialize all enemy models in the folder
 	local foundAny = false
 	for _, model in ipairs(enemiesFolder:GetChildren()) do
 		if model:IsA("Model") then
-			print("[EnemiesAutoApply] Initializing enemy model: " .. tostring(model.Name))
+			-- Spawn enemy initialization task
 			task.spawn(EnemiesManager.Start, model)
 			foundAny = true
-		else
-			print("[EnemiesAutoApply] Skipped non-model object: " .. tostring(model.Name) .. " (type: " .. tostring(model.ClassName) .. ")")
 		end
 	end
 	if not foundAny then

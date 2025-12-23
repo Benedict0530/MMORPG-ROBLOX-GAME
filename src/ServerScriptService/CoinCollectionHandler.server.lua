@@ -1,8 +1,12 @@
 -- CoinCollectionHandler.server.lua
 -- Handles coin collection via RemoteEvent when player presses E
+-- All saves are delegated to UnifiedDataStoreManager
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
 
 -- Create RemoteEvent for coin collection if it doesn't exist
 local coinCollectRemote = ReplicatedStorage:FindFirstChild("CoinCollect")
@@ -14,7 +18,6 @@ end
 
 local COLLECT_DISTANCE = 10
 local COLLECT_COOLDOWN = 0.5 -- Prevent rapid requests
-local statsStore = game:GetService("DataStoreService"):GetDataStore("PlayerStats")
 
 -- Track coins being collected to prevent duplication
 local coinsBeingCollected = {}
@@ -22,10 +25,6 @@ local coinsBeingCollected = {}
 local playerCollectCooldown = {}
 -- Track pending money to save periodically instead of on every coin
 local pendingMoneySave = {}
--- Track last save time per player to throttle datastore requests
-local lastSaveTime = {}
--- Save interval (save every 5 seconds or when player leaves)
-local SAVE_INTERVAL = 5
 
 -- Handle coin collection request from client
 coinCollectRemote.OnServerEvent:Connect(function(player, coin)
@@ -89,8 +88,6 @@ coinCollectRemote.OnServerEvent:Connect(function(player, coin)
 		local moneyValue = statsFolder:FindFirstChild("Money")
 		if moneyValue then
 			moneyValue.Value = moneyValue.Value + coinValue
-			print("[CoinCollectionHandler] Player " .. player.Name .. " collected " .. coinValue .. " coins! Total: " .. moneyValue.Value)
-			
 			-- Track pending money to save to datastore later (not immediately)
 			pendingMoneySave[player.UserId] = (pendingMoneySave[player.UserId] or 0) + coinValue
 		end
@@ -112,32 +109,12 @@ local function savePendingMoney(userId)
 		return
 	end
 	
-	local now = tick()
-	-- Only save if enough time has passed since last attempt
-	if lastSaveTime[userId] and (now - lastSaveTime[userId]) < SAVE_INTERVAL then
-		return
-	end
+	local player = Players:GetPlayerByUserId(userId)
+	if not player then return end
 	
-	lastSaveTime[userId] = now
-	local key = "Player_" .. userId
-	local moneyToSave = pendingMoneySave[userId]
-	
-	local success, err = pcall(function()
-		statsStore:UpdateAsync(key, function(old)
-			old = old or {}
-			old["Money"] = (old["Money"] or 0) + moneyToSave
-			return old
-		end)
-	end)
-	
-	if success then
-		pendingMoneySave[userId] = nil
-		print("[CoinCollectionHandler] Saved " .. moneyToSave .. " money for user " .. userId)
-	else
-		warn("[CoinCollectionHandler] Failed to save money for user " .. userId .. ": " .. tostring(err))
-		-- On failure, allow retry after 2 seconds instead of immediately
-		lastSaveTime[userId] = now - (SAVE_INTERVAL - 2)
-	end
+	-- Delegate to UnifiedDataStoreManager
+	UnifiedDataStoreManager.SaveMoney(player, false)
+	pendingMoneySave[userId] = nil
 end
 
 -- Save money periodically (check every frame but only act on throttled interval)
@@ -154,11 +131,9 @@ local cleanupConnection
 cleanupConnection = Players.PlayerRemoving:Connect(function(player)
 	-- Save any pending money before player leaves (force save immediately)
 	if pendingMoneySave[player.UserId] and pendingMoneySave[player.UserId] > 0 then
-		lastSaveTime[player.UserId] = 0 -- Force save by resetting timer
-		savePendingMoney(player.UserId)
+		UnifiedDataStoreManager.SaveMoney(player, true)
 	end
 	-- Clear player tracking
 	playerCollectCooldown[player.UserId] = nil
 	pendingMoneySave[player.UserId] = nil
-	lastSaveTime[player.UserId] = nil
 end)
