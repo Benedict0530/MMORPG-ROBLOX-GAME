@@ -110,8 +110,8 @@ function WeaponManager.PerformAttack(player, tool)
 			local oldHealth = enemyHealth.Value
 			enemyHealth.Value = math.max(oldHealth - damage, 0)
 			
-			-- Show damage text on all clients with critical indicator
-			damageEvent:FireAllClients(enemyModel, damage, isCritical)
+			-- Show damage text on all clients with critical indicator (true = player damage, white)
+			damageEvent:FireAllClients(enemyModel, damage, isCritical, true)
 			
 			local critText = isCritical and " [CRITICAL]" or ""
 			print(string.format("[WeaponManager] %s hit enemy '%s' for %d damage%s. HP: %d/%d (Attack: %d, Weapon: %s, Dex: %d)", 

@@ -51,6 +51,14 @@ end
 -- Hide the template (we'll clone it to create items, but don't want to show the template itself)
 itemTemplate.Visible = false
 
+-- Get ItemStats panel
+local itemStats = inventoryUI:WaitForChild("Background"):WaitForChild("ItemStats", 10)
+if not itemStats then
+	warn("[InventoryUI] ItemStats not found in InventoryUI after 10 second wait - will skip stats display")
+else
+	itemStats.Visible = false -- Initially hidden
+end
+
 -- Get weapons folder
 local weaponsFolder = ReplicatedStorage:FindFirstChild("Weapons")
 if not weaponsFolder then
@@ -79,15 +87,11 @@ end
 
 -- Function to create inventory item UI
 local function createInventoryItem(itemData, index)
-	print("[InventoryUI] Creating item clone for: " .. itemData.name)
 	local itemClone = itemTemplate:Clone()
-	print("[InventoryUI] Clone created, clone type: " .. itemClone.ClassName)
 	
 	itemClone.Name = "Item_" .. index
 	itemClone.Visible = true
 	itemClone.LayoutOrder = index
-	
-	print("[InventoryUI] Before parenting - scrollingFrame children: " .. #scrollingFrame:GetChildren())
 	
 	-- Find Item Name and Item Image elements
 	local itemName = itemClone:FindFirstChild("Item Name")
@@ -120,7 +124,6 @@ local function createInventoryItem(itemData, index)
 		-- Get weapon image and set it
 		local imageId = getWeaponImage(itemData.name)
 		itemImage.Image = imageId
-		print("[InventoryUI] Set image for " .. itemData.name .. ": " .. imageId)
 	else
 		warn("[InventoryUI] Item Image is not an ImageLabel!")
 		itemClone:Destroy()
@@ -131,10 +134,41 @@ local function createInventoryItem(itemData, index)
 	itemClone:SetAttribute("ItemId", itemData.id)
 	itemClone:SetAttribute("ItemName", itemData.name)
 	
-	print("[InventoryUI] Parenting itemClone to scrollingFrame...")
+	-- Add click handler to show item stats
+	itemClone.MouseButton1Click:Connect(function()
+		-- Use the itemStats reference from module scope
+		if not itemStats then 
+			warn("[InventoryUI] ItemStats not available")
+			return 
+		end
+		
+		-- Get weapon stats from WeaponData
+		local weaponStats = WeaponData.GetWeaponStats(itemData.name)
+		
+		if not weaponStats then
+			warn("[InventoryUI] Could not find weapon stats for " .. itemData.name)
+			return
+		end
+		
+		-- Update ItemStats Description with all weapon information
+		local statsDescription = itemStats:FindFirstChild("Description")
+		
+		if statsDescription then
+			if statsDescription:IsA("TextLabel") or statsDescription:IsA("TextButton") then
+				local descText = itemData.name .. "\n" ..
+					"Damage: " .. tostring(weaponStats.damage) .. "\n" ..
+					"Level Requirement: " .. tostring(weaponStats.levelRequirement or "N/A") .. "\n" ..
+					(weaponStats.Description or "No description available")
+				statsDescription.Text = descText
+
+			end
+		end
+		
+		-- Toggle ItemStats panel visibility
+		itemStats.Visible = true
+	end)
+	
 	itemClone.Parent = scrollingFrame
-	print("[InventoryUI] Item parented! ScrollingFrame now has " .. #scrollingFrame:GetChildren() .. " children")
-	print("[InventoryUI] Created inventory item: " .. itemData.name .. " (ID: " .. itemData.id .. ")")
 	
 	return itemClone
 end
@@ -169,46 +203,30 @@ local function refreshInventory()
 		return inventoryEvent:InvokeServer()
 	end)
 	
-	print("[InventoryUI] Invocation success: " .. tostring(success))
-	print("[InventoryUI] Inventory data type: " .. type(inventoryData))
-	print("[InventoryUI] Inventory data: " .. tostring(inventoryData))
-	
 	if not success then
 		warn("[InventoryUI] Failed to get inventory from server: " .. tostring(inventoryData))
 		return
 	end
 	
-	print("[InventoryUI] inventoryData length: " .. tostring(#inventoryData))
-	
-	-- Debug: Try to iterate through the table manually
-	print("[InventoryUI] Attempting to iterate through inventoryData:")
-	for key, value in pairs(inventoryData) do
-		print("[InventoryUI] Key: " .. tostring(key) .. ", Value type: " .. type(value))
-		if type(value) == "table" and value.name then
-			print("[InventoryUI] Found item: " .. value.name .. " (ID: " .. value.id .. ")")
-		end
-	end
-	
 	if not inventoryData or #inventoryData == 0 then
-		print("[InventoryUI] Player inventory is empty!")
-		print("[InventoryUI] inventoryData value: " .. tostring(inventoryData))
 		return
 	end
 	
 	-- Create UI items for each inventory item
 	for index, itemData in ipairs(inventoryData) do
-		print("[InventoryUI] Processing item " .. index .. ": " .. itemData.name)
 		createInventoryItem(itemData, index)
 	end
-	
-	print(string.format("[InventoryUI] Displayed %d inventory items", #inventoryData))
-	print("[InventoryUI] Final scrollingFrame children count: " .. #scrollingFrame:GetChildren())
 end
 
 -- Initial refresh
 refreshInventory()
 
--- Listen for inventory changes (if we implement inventory updates later)
--- For now, we can refresh on demand or periodically
-
-print("[InventoryUI] Inventory UI initialized!")
+-- Listen for inventory changes from server
+local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
+if inventoryChangedEvent then
+	inventoryChangedEvent.OnClientEvent:Connect(function()
+		refreshInventory()
+	end)
+else
+	warn("[InventoryUI] InventoryChanged event not found - UI won't auto-update on item collection")
+end

@@ -1,5 +1,5 @@
 -- CoinCollection.client.lua
--- Handles E key input for nearby coin collection
+-- Handles E key input for nearby coin and item drop collection
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -9,8 +9,8 @@ local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 
 -- Get or wait for RemoteEvent
-local function getCoinCollectRemote()
-	return ReplicatedStorage:WaitForChild("CoinCollect", 5)
+local function getCollectRemote()
+	return ReplicatedStorage:WaitForChild("ItemCollect", 5)
 end
 
 local COLLECT_DISTANCE = 5
@@ -34,28 +34,30 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		
 		local playerRoot = character.HumanoidRootPart
 		
-		-- Find the closest coin
-		local closestCoin = nil
+		-- Find the closest collectible item (coins or drops)
+		local closestItem = nil
 		local closestDistance = COLLECT_DISTANCE
 		
 		for _, item in ipairs(workspace:GetChildren()) do
-			if item:FindFirstChild("CoinType") then
-				local coinRoot = item:FindFirstChild("HumanoidRootPart") or item:FindFirstChild("PrimaryPart") or item
-				if coinRoot then
-					local distance = (coinRoot.Position - playerRoot.Position).Magnitude
+			-- Check for coins or item drops
+			if item:FindFirstChild("CoinType") or item:FindFirstChild("ItemType") then
+				-- Use GetPivot() which works on both parts and models
+				local itemPivot = item:GetPivot()
+				if itemPivot then
+					local distance = (itemPivot.Position - playerRoot.Position).Magnitude
 					if distance <= closestDistance then
 						closestDistance = distance
-						closestCoin = item
+						closestItem = item
 					end
 				end
 			end
 		end
 		
-		-- Collect only the closest coin
-		if closestCoin then
-			local remote = getCoinCollectRemote()
+		-- Collect the closest item
+		if closestItem then
+			local remote = getCollectRemote()
 			if remote then
-				remote:FireServer(closestCoin)
+				remote:FireServer(closestItem)
 			end
 		end
 	end
@@ -65,3 +67,4 @@ end)
 player.CharacterAdded:Connect(function(newCharacter)
 	character = newCharacter
 end)
+

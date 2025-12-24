@@ -24,11 +24,8 @@ statsUpdateEvent.Parent = ReplicatedStorage
 local STAT_COST = 1
 
 -- Maximum stat values (optional cap)
+-- Only Dexterity has a max limit, all other stats are unlimited
 local MAX_STAT_VALUES = {
-	MaxHealth = 500,
-	MaxMana = 100,
-	Attack = 100,
-	Defence = 100,
 	Dexterity = 300
 }
 
@@ -60,9 +57,9 @@ local function allocateStatPoint(player, statType)
 		return false
 	end
 	
-	-- Check if stat is at max
+	-- Check if stat is at max (only Dexterity has a limit)
 	local maxValue = MAX_STAT_VALUES[statType]
-	if statValue.Value >= maxValue then
+	if maxValue and statValue.Value >= maxValue then
 		return false
 	end
 	
@@ -83,6 +80,7 @@ local function allocateStatPoint(player, statType)
 			currentMana.Value = currentMana.Value + 5
 		end
 	else
+		-- Attack, Defence, Dexterity all increase by 1
 		statValue.Value = statValue.Value + 1
 	end
 	
@@ -109,7 +107,7 @@ local function resetStats(player)
 	
 	-- Check if already at default stats to prevent giving extra points
 	local baseStats = {
-		MaxHealth = 50,
+		MaxHealth = 10,
 		MaxMana = 5,
 		Attack = 1,
 		Defence = 1,
@@ -135,8 +133,37 @@ local function resetStats(player)
 	-- Decrement reset points
 	resetPoints.Value = resetPoints.Value - 1
 	
-	-- Calculate total stat points = 3 * level
-	local totalStatPoints = 3 * (level.Value or 1)
+	-- Calculate total stat points based on actual stat increases from defaults
+	-- considering the cost per point for each stat
+	local baseStats = {
+		MaxHealth = 10,
+		MaxMana = 5,
+		Attack = 1,
+		Defence = 1,
+		Dexterity = 1
+	}
+	
+	local statIncreaseAmounts = {
+		MaxHealth = 10,  -- Each point adds 10
+		MaxMana = 5,      -- Each point adds 5
+		Attack = 1,       -- Each point adds 1
+		Defence = 1,      -- Each point adds 1
+		Dexterity = 1     -- Each point adds 1
+	}
+	
+	local totalStatPoints = 0
+	for statName, baseValue in pairs(baseStats) do
+		local stat = stats:FindFirstChild(statName)
+		if stat then
+			local currentValue = stat.Value
+			local increaseAmount = statIncreaseAmounts[statName]
+			-- Calculate points spent: (current - base) / increase per point
+			local pointsSpent = math.floor((currentValue - baseValue) / increaseAmount)
+			if pointsSpent > 0 then
+				totalStatPoints = totalStatPoints + pointsSpent
+			end
+		end
+	end
 	
 	-- Reset stats to base values
 	for statName, baseValue in pairs(baseStats) do

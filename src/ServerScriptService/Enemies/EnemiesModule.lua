@@ -3,6 +3,13 @@ local playerHP = {} -- Shared player HP table for all enemies
 local DEFAULT_MAX_HEALTH = 1
 local Players = game:GetService("Players")
 local PhysicsService = game:GetService("PhysicsService")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+-- Load DamageManager for incoming damage calculations
+local DamageManager = require(ServerScriptService:FindFirstChild("DamageManager"))
+
+-- Load ItemDropManager for handling drops
+local ItemDropManager = require(ServerScriptService.Items:FindFirstChild("ItemDropManager"))
 
 -- Initialize collision groups once
 pcall(function() PhysicsService:RegisterCollisionGroup("Env") end)
@@ -120,8 +127,11 @@ function EnemiesManager.Start(model)
 		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	end
 	local root = slime:FindFirstChild("HumanoidRootPart")
-	local defaultPosition = root and root.Position or nil
 	if not root then warn("[GloopCrusher] HumanoidRootPart not found in model!") end
+	
+	-- Wait a bit for the model to settle into its position before capturing spawn location
+	task.wait(0.1)
+	local defaultPosition = root and root.Position or nil
 
 	-- Load all enemy stats from datastore based on enemy name
 	local enemyStatsDataStore = require(script.Parent:FindFirstChild("EnemyStatsDataStore"))
@@ -144,6 +154,15 @@ function EnemiesManager.Start(model)
 	local statsStore = game:GetService("DataStoreService"):GetDataStore("PlayerStats")
 	local lastDamagedByPlayer = nil -- Track which player dealt damage to this enemy
 	local playerStatConnections = {} -- Store connections to player stat changes for cleanup
+	
+	-- Get DamageEvent to notify clients of damage
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
+	if not damageEvent then
+		damageEvent = Instance.new("RemoteEvent")
+		damageEvent.Name = "EnemyDamage"
+		damageEvent.Parent = ReplicatedStorage
+	end
 	
 	-- Setup real-time listener for player stat changes
 	local function setupPlayerStatListener(player)
@@ -268,10 +287,26 @@ function EnemiesManager.Start(model)
 						-- Check if player is already dead
 						if currentHealthValue.Value <= 0 then return end
 						
+						-- Calculate actual damage after player's defense reduction
+						local actualDamage = DamageManager.CalculateIncomingDamage(damage, player)
+						
 						-- Apply damage directly to the DataStore-synced CurrentHealth
-						currentHealthValue.Value = math.max(currentHealthValue.Value - damage, 0)
+						currentHealthValue.Value = math.max(currentHealthValue.Value - actualDamage, 0)
 						lastDamagedByPlayer = player -- Track who damaged this enemy
 						hitCooldowns[userId] = tick()
+						
+						-- Show damage text on client (even if 0 damage, shows "-0") (false = enemy damage, red)
+						local character = player.Character
+						if character then
+							local targetPart = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+							if targetPart then
+								damageEvent:FireClient(player, targetPart, actualDamage, false, false)
+							end
+						end
+						
+						-- Debug: Show defense reduction with proper stats
+						local defence, armorDefense, defensiveOutput = DamageManager.GetDefenseInfo(player)
+						print("[EnemiesModule] " .. player.Name .. " took " .. actualDamage .. " damage (base: " .. damage .. ", Defence: " .. defence .. ", ArmorDefence: " .. armorDefense .. ", Defensive Output: " .. math.floor(defensiveOutput) .. ")")
 						
 						-- If player died from this hit
 						if currentHealthValue.Value <= 0 then
@@ -315,6 +350,7 @@ function EnemiesManager.Start(model)
 	end
 	
 	local isDead = false -- Flag to prevent damage after death
+	local parent, enemyName, respawnPosition = slime.Parent, slime.Name, nil
 	
 	-- Function to update health bar
 	local function updateEnemyHealthBar()
@@ -461,7 +497,7 @@ function EnemiesManager.Start(model)
 			end
 			table.clear(playerStatConnections)
 			
-local parent, enemyName, respawnPosition = slime.Parent, slime.Name, defaultPosition
+			respawnPosition = defaultPosition  -- Save the spawn position for respawn
 		
 		-- Get enemy experience reward
 		local enemyExperience = enemyStats and enemyStats.Experience or 0
@@ -482,6 +518,17 @@ local parent, enemyName, respawnPosition = slime.Parent, slime.Name, defaultPosi
 	end
 	
 	local ServerStorage = game:GetService("ServerStorage")
+	
+	-- Determine spawn position for drops
+	local dropSpawnPosition = root.Position + Vector3.new(0, -1, 0)
+	if lastDamagedByPlayer and lastDamagedByPlayer.Character then
+		local playerRoot = lastDamagedByPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if playerRoot then
+			dropSpawnPosition = Vector3.new(playerRoot.Position.X, root.Position.Y, playerRoot.Position.Z)
+		end
+	end
+	
+	-- Spawn coins
 	local coinTemplate = ServerStorage:FindFirstChild("Coin")
 	
 	if coinTemplate then
@@ -493,26 +540,9 @@ local parent, enemyName, respawnPosition = slime.Parent, slime.Name, defaultPosi
 		coin.Parent = workspace
 		local coinRoot = coin:FindFirstChild("HumanoidRootPart") or coin:FindFirstChild("PrimaryPart") or coin
 		
-		-- Spawn coin at a default location (enemy position or player position if available)
-		if coinRoot and root then
-			local spawnPosition
-			if lastDamagedByPlayer and lastDamagedByPlayer.Character then
-				-- Spawn coin at player's position if player exists
-				local playerRoot = lastDamagedByPlayer.Character:FindFirstChild("HumanoidRootPart")
-				if playerRoot then
-					spawnPosition = Vector3.new(playerRoot.Position.X, root.Position.Y - 1, playerRoot.Position.Z)
-				else
-					-- Fallback: spawn at enemy position
-					spawnPosition = root.Position + Vector3.new(0, 2, 0)
-				end
-			else
-				-- No player damaged this enemy, spawn at enemy position
-				print("[EnemiesModule] No player dealt damage to " .. slime.Name .. ", spawning coin at enemy position")
-				spawnPosition = root.Position + Vector3.new(0, 2, 0)
-			end
-			
-			-- Apply spawn position while preserving original orientation using rotation vectors
-			coinRoot.CFrame = CFrame.fromMatrix(spawnPosition, originalCFrame.RightVector, originalCFrame.UpVector)
+		-- Spawn coin at drop position
+		if coinRoot then
+			coinRoot.CFrame = CFrame.fromMatrix(dropSpawnPosition, originalCFrame.RightVector, originalCFrame.UpVector)
 		end
 		
 		-- Anchor all coin parts
@@ -558,6 +588,12 @@ local parent, enemyName, respawnPosition = slime.Parent, slime.Name, defaultPosi
 				coin:Destroy()
 			end
 		end)
+	end
+	
+	-- Spawn item drops from enemy stats
+	if enemyStats and enemyStats.Drops then
+		local spawnedItems = ItemDropManager.SpawnEnemyDrops(enemyStats, dropSpawnPosition, lastDamagedByPlayer)
+		print("[EnemiesModule] Spawned " .. #spawnedItems .. " item drops for " .. slime.Name)
 	end
 			
 			-- Enable collision on all parts before breaking joints

@@ -7,20 +7,25 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
 
 -- Example default stats for enemies
+-- Drops format: { itemName = "Twig", chance = 0.5 } means 50% chance to drop
 local DEFAULT_ENEMY_STATS = {
     ["Gloop Crusher"] = {
         Health = 30,
-        Attack = 1,
+        Attack = 8,
         Experience = 1,
         Money = 1,
-        Drops = {"SlimeBall", "GloopEssence","Twig"}
+        Drops = {
+            { itemName = "Twig", chance = 0.3 }  -- 30% chance to drop Twig
+        }
     },
     ["Slime"] = {
         Health = 10,
         Attack = 1,
         Experience = 2,
         Money = 2,
-        Drops = {"SlimeBall"}
+        Drops = {
+            { itemName = "SlimeBall", chance = 0.25 }  -- 25% chance to drop SlimeBall
+        }
     }
     -- Add more enemies here
 }

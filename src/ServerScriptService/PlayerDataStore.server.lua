@@ -72,12 +72,13 @@ local function getStatsReadySignal(userId)
 end
 
 local DEFAULT_STATS = {
-	MaxHealth = 50,
-	CurrentHealth = 50,
+	MaxHealth = 10,
+	CurrentHealth = 10,
 	MaxMana = 5,
 	CurrentMana = 5,
 	Attack = 1,
 	Defence = 1,
+	ArmorDefence = 0,
 	Dexterity = 1,
 	Money = 0,
 	Level = 1,
@@ -276,6 +277,22 @@ Players.PlayerAdded:Connect(function(player)
 	-- Setup CharacterAdded to add future characters to collision group and reset health/mana
 	player.CharacterAdded:Connect(function(character)
 		task.spawn(function()
+			task.wait(0.1) -- Short wait for character to spawn
+			
+			-- Find spawn location and position character at correct Z level
+			local spawnLocation = workspace:FindFirstChild("SpawnLocation")
+			if spawnLocation and spawnLocation:IsA("BasePart") then
+				local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+				if humanoidRootPart then
+					-- Get spawn position - keep character's XY but use spawn location's Z
+					local spawnPos = spawnLocation.Position
+					local charPos = humanoidRootPart.Position
+					-- Position at spawn location, slightly above the part
+					humanoidRootPart.CFrame = CFrame.new(spawnPos.X, spawnPos.Y, spawnPos.Z + 5)
+					print("[PlayerDataStore] Positioned " .. player.Name .. " at spawn location Z: " .. spawnPos.Z)
+				end
+			end
+			
 			task.wait(0.5) -- Wait for character parts to fully load
 			
 			-- Reset CurrentHealth and CurrentMana to full when respawning

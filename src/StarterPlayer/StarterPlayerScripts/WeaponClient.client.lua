@@ -33,6 +33,17 @@ local function setupCharacter(newCharacter)
 	childAddedConnection = character.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") then
 			currentTool = child
+			
+			-- Play Idle animation on loop when weapon is equipped
+			local idleAnimation = child:FindFirstChild("Idle")
+			if idleAnimation and idleAnimation:IsA("Animation") then
+				local animator = humanoid:FindFirstChildOfClass("Animator")
+				if animator then
+					local track = animator:LoadAnimation(idleAnimation)
+					track.Looped = true
+					track:Play()
+				end
+			end
 		end
 	end)
 
@@ -64,8 +75,8 @@ local function performAttack(tool)
 		return
 	end
 	
-	-- Play Attack animation if it exists
-	local attackAnimation = tool:FindFirstChild("Attack")
+	-- Play Attack1 animation if it exists
+	local attackAnimation = tool:FindFirstChild("Attack1")
 	if attackAnimation and attackAnimation:IsA("Animation") then
 		local animator = humanoid:FindFirstChildOfClass("Animator")
 		if animator then

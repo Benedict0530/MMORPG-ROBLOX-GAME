@@ -190,7 +190,7 @@ local function updateStatsInfoDisplay()
 		end
 		
 		local minDamage = attackDamage + weaponDamage
-		local maxDamage = math.floor((attackDamage * 1.5) + weaponDamage)
+		local maxDamage = math.floor((attackDamage + weaponDamage) * 2)
 		damageValue.Text = "Damage: " .. formatNumberWithCommas(minDamage) .. " - " .. formatNumberWithCommas(maxDamage)
 	end
 	
@@ -228,6 +228,7 @@ local function showDamageText(targetPart, damageAmount, isEnemy, isCritical)
 		textLabel.TextColor3 = Color3.fromRGB(30, 100, 180) -- Darker blue
 	else
 		textLabel.TextSize = 24
+		-- Red if player damage (isEnemy = false), white if enemy damage (isEnemy = true)
 		textLabel.TextColor3 = isEnemy and Color3.fromRGB(255, 254, 254) or Color3.fromRGB(255, 0, 0)
 	end
 	textLabel.Parent = billboard
@@ -258,10 +259,6 @@ end
 
 
 local function updateHealthWithDamage(value)
-	local damage = previousHealth - value
-	if damage > 0 then
-		showDamageText(character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso"), damage)
-	end
 	previousHealth = value
 	updateHealthBar(value)
 end
@@ -507,12 +504,10 @@ end)
 
 -- Listen for enemy damage events from server
 local damageEvent = ReplicatedStorage:WaitForChild("EnemyDamage")
-damageEvent.OnClientEvent:Connect(function(enemyModel, damageAmount, isCritical)
-	if enemyModel then
-		local enemyHead = enemyModel:FindFirstChild("Head")
-		if enemyHead then
-			showDamageText(enemyHead, damageAmount, true, isCritical)
-		end
+damageEvent.OnClientEvent:Connect(function(targetPart, damageAmount, isCritical, isFromPlayer)
+	if targetPart then
+		-- isFromPlayer: true = player damaged enemy (white), false = enemy damaged player (red)
+		showDamageText(targetPart, damageAmount, isFromPlayer, isCritical)
 	end
 end)
 
