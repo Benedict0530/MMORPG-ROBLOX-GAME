@@ -6,10 +6,10 @@ local PhysicsService = game:GetService("PhysicsService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 -- Load DamageManager for incoming damage calculations
-local DamageManager = require(ServerScriptService:FindFirstChild("DamageManager"))
+local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
 
 -- Load ItemDropManager for handling drops
-local ItemDropManager = require(ServerScriptService.Items:FindFirstChild("ItemDropManager"))
+local ItemDropManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("ItemDropManager"))
 
 -- Initialize collision groups once
 pcall(function() PhysicsService:RegisterCollisionGroup("Env") end)
@@ -107,8 +107,14 @@ end)
 
 function EnemiesManager.Start(model)
 	local slime = model
-	if not slime then warn("[GloopCrusher] Model not found!"); return end
-
+	if not slime then warn("[EnemiesModule] Model not found!"); return end
+	
+	-- Prevent double initialization (might be called from both DescendantAdded and respawn code)
+	if slime:GetAttribute("_EnemyInitialized") then
+		return
+	end
+	slime:SetAttribute("_EnemyInitialized", true)
+	
 	local COLLISION_GROUP = "Enemies"
 	pcall(function() PhysicsService:RegisterCollisionGroup(COLLISION_GROUP) end)
 	PhysicsService:CollisionGroupSetCollidable(COLLISION_GROUP, COLLISION_GROUP, false)
@@ -122,19 +128,19 @@ function EnemiesManager.Start(model)
 	setCollisionGroupRecursive(slime)
 
 	local humanoid = slime:FindFirstChild("Humanoid")
-	if not humanoid then warn("[GloopCrusher] Humanoid not found in model!") end
+	if not humanoid then warn("[EnemiesModule] Humanoid not found in model!") end
 	if humanoid then
 		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	end
 	local root = slime:FindFirstChild("HumanoidRootPart")
-	if not root then warn("[GloopCrusher] HumanoidRootPart not found in model!") end
-	
+	if not root then warn("[EnemiesModule] HumanoidRootPart not found in model!"); return end
+		
 	-- Wait a bit for the model to settle into its position before capturing spawn location
 	task.wait(0.1)
 	local defaultPosition = root and root.Position or nil
 
 	-- Load all enemy stats from datastore based on enemy name
-	local enemyStatsDataStore = require(script.Parent:FindFirstChild("EnemyStatsDataStore"))
+	local enemyStatsDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("EnemyStatsDataStore"))
 	local enemyStats = enemyStatsDataStore.loadEnemyStats(slime.Name)
 	
 	-- Map stats from datastore
@@ -154,6 +160,7 @@ function EnemiesManager.Start(model)
 	local statsStore = game:GetService("DataStoreService"):GetDataStore("PlayerStats")
 	local lastDamagedByPlayer = nil -- Track which player dealt damage to this enemy
 	local playerStatConnections = {} -- Store connections to player stat changes for cleanup
+	local playerDamage = {} -- Track damage dealt by each player for experience distribution
 	
 	-- Get DamageEvent to notify clients of damage
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -275,44 +282,47 @@ function EnemiesManager.Start(model)
 					if touchDebounce[userId] then return end
 					touchDebounce[userId] = true
 					task.delay(1, function() touchDebounce[userId] = nil end)
-					if not hitCooldowns[userId] or tick() - hitCooldowns[userId] > cooldown then
-						-- Always get current health from player's Stats folder (DataStore source of truth)
-						local statsFolder = player:FindFirstChild("Stats")
-						if not statsFolder then return end
-						
-						local currentHealthValue = statsFolder:FindFirstChild("CurrentHealth")
-						local maxHealthValue = statsFolder:FindFirstChild("MaxHealth")
-						if not currentHealthValue or not maxHealthValue then return end
-						
-						-- Check if player is already dead
-						if currentHealthValue.Value <= 0 then return end
-						
-						-- Calculate actual damage after player's defense reduction
-						local actualDamage = DamageManager.CalculateIncomingDamage(damage, player)
-						
-						-- Apply damage directly to the DataStore-synced CurrentHealth
-						currentHealthValue.Value = math.max(currentHealthValue.Value - actualDamage, 0)
-						lastDamagedByPlayer = player -- Track who damaged this enemy
-						hitCooldowns[userId] = tick()
-						
-						-- Show damage text on client (even if 0 damage, shows "-0") (false = enemy damage, red)
-						local character = player.Character
-						if character then
-							local targetPart = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
-							if targetPart then
-								damageEvent:FireClient(player, targetPart, actualDamage, false, false)
-							end
-						end
-						
-						-- Debug: Show defense reduction with proper stats
-						local defence, armorDefense, defensiveOutput = DamageManager.GetDefenseInfo(player)
-						print("[EnemiesModule] " .. player.Name .. " took " .. actualDamage .. " damage (base: " .. damage .. ", Defence: " .. defence .. ", ArmorDefence: " .. armorDefense .. ", Defensive Output: " .. math.floor(defensiveOutput) .. ")")
-						
-						-- If player died from this hit
-						if currentHealthValue.Value <= 0 then
-							if character then character:BreakJoints() end
+				if not hitCooldowns[userId] or tick() - hitCooldowns[userId] > cooldown then
+					-- Always get current health from player's Stats folder (DataStore source of truth)
+					local statsFolder = player:FindFirstChild("Stats")
+					if not statsFolder then return end
+					
+					local currentHealthValue = statsFolder:FindFirstChild("CurrentHealth")
+					local maxHealthValue = statsFolder:FindFirstChild("MaxHealth")
+					if not currentHealthValue or not maxHealthValue then return end
+					
+					-- Check if player is already dead
+					if currentHealthValue.Value <= 0 then return end
+					
+					-- Calculate actual damage after player's defense reduction
+					local actualDamage = DamageManager.CalculateIncomingDamage(damage, player)
+					
+					-- Apply damage directly to the DataStore-synced CurrentHealth
+					currentHealthValue.Value = math.max(currentHealthValue.Value - actualDamage, 0)
+					lastDamagedByPlayer = player -- Track who damaged this enemy
+					
+					-- Track damage dealt by this player for experience distribution
+					playerDamage[userId] = (playerDamage[userId] or 0) + actualDamage
+					
+					hitCooldowns[userId] = tick()
+					
+					-- Show damage text on client (even if 0 damage, shows "-0") (false = enemy damage, red)
+					local character = player.Character
+					if character then
+						local targetPart = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+						if targetPart then
+							damageEvent:FireClient(player, targetPart, actualDamage, false, false)
 						end
 					end
+					
+					-- Debug: Show defense reduction with proper stats
+					local defence, armorDefense, defensiveOutput = DamageManager.GetDefenseInfo(player)
+					
+					-- If player died from this hit
+					if currentHealthValue.Value <= 0 then
+						if character then character:BreakJoints() end
+					end
+				end
 				end
 			end
 		end)
@@ -484,6 +494,21 @@ function EnemiesManager.Start(model)
 			isDead = true -- Mark enemy as dead to prevent further damage
 			enemyHealth.Value = 0 -- Ensure health is 0
 			
+			-- IMMEDIATELY set up collision group to prevent dead enemy from hitting players
+			pcall(function() PhysicsService:RegisterCollisionGroup("DeadEnemies") end)
+			PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "DeadEnemies", true)
+			pcall(function() PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "Players", false) end)
+			
+			-- Add all slime parts to DeadEnemies group immediately
+			local function addToDeadEnemiesGroup(obj)
+				if not obj then return end
+				if obj:IsA("BasePart") then 
+					obj.CollisionGroup = "DeadEnemies"
+				end
+				for _, child in ipairs(obj:GetChildren()) do addToDeadEnemiesGroup(child) end
+			end
+			addToDeadEnemiesGroup(slime)
+			
 			-- Disconnect the damage connection so dead slime doesn't hurt players
 			if touchConnection then
 				touchConnection:Disconnect()
@@ -502,25 +527,82 @@ function EnemiesManager.Start(model)
 		-- Get enemy experience reward
 		local enemyExperience = enemyStats and enemyStats.Experience or 0
 		
-		-- Award experience to the player who dealt damage to this enemy
-		if lastDamagedByPlayer and enemyExperience > 0 then
-			local player = lastDamagedByPlayer
-			local stats = player:FindFirstChild("Stats")
-			if stats then
-				local experienceValue = stats:FindFirstChild("Experience")
-				if experienceValue then
-					experienceValue.Value = experienceValue.Value + enemyExperience
+		-- Calculate total damage dealt by all players
+		local totalDamage = 0
+		for userId, damage in pairs(playerDamage) do
+			totalDamage = totalDamage + damage
+		end
+		
+		-- Debug: Log experience distribution
+		print("[EnemiesModule] Enemy died:", enemyName, "| Experience:", enemyExperience, "| Total Damage:", totalDamage, "| Players who damaged:", table.getn(playerDamage))
+		
+		-- Distribute experience to all players who dealt damage, proportional to their damage
+		if enemyExperience > 0 then
+			if totalDamage > 0 then
+				-- Normal case: distribute proportionally based on damage dealt
+				for userId, damageDealt in pairs(playerDamage) do
+					local player = Players:GetPlayerByUserId(userId)
+					if player then
+						local stats = player:FindFirstChild("Stats")
+						if stats then
+							-- Calculate this player's share of experience
+							local damagePercentage = damageDealt / totalDamage
+							local playerExperience = math.floor(enemyExperience * damagePercentage)
+							
+							-- Award experience (minimum 1 XP per damaging player, or proportional if small amounts)
+							local xpToAward = math.max(playerExperience, 1)
+							
+							local experienceValue = stats:FindFirstChild("Experience")
+							if experienceValue then
+								experienceValue.Value = experienceValue.Value + xpToAward
+								print("[EnemiesModule] Awarded", xpToAward, "XP to", player.Name)
+								
+								-- NO LONGER writing directly to DataStore on every XP gain
+								-- LevelSystem.server.lua will handle throttled saves when Experience changes
+							end
+						end
+					end
+				end
+			else
+				-- Fallback: no damage tracked but players might be nearby, find nearest players and award them
+				print("[EnemiesModule] WARNING: No damage tracked for", enemyName, "! Finding nearby players...")
+				local nearbyPlayers = {}
+				for _, player in ipairs(Players:GetPlayers()) do
+					if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+						local playerRoot = player.Character.HumanoidRootPart
+						local distance = (playerRoot.Position - root.Position).Magnitude
+						if distance < 100 then -- Award XP to players within 100 studs
+							table.insert(nearbyPlayers, {player = player, distance = distance})
+						end
+					end
+				end
+				
+				-- Award XP equally to nearby players (or full amount if only one)
+				if #nearbyPlayers > 0 then
+					local xpPerPlayer = math.floor(enemyExperience / #nearbyPlayers)
+					xpPerPlayer = math.max(xpPerPlayer, 1)
 					
-					-- NO LONGER writing directly to DataStore on every XP gain
-					-- LevelSystem.server.lua will handle throttled saves when Experience changes
+					for _, entry in ipairs(nearbyPlayers) do
+						local player = entry.player
+						local stats = player:FindFirstChild("Stats")
+						if stats then
+							local experienceValue = stats:FindFirstChild("Experience")
+							if experienceValue then
+								experienceValue.Value = experienceValue.Value + xpPerPlayer
+								print("[EnemiesModule] Awarded", xpPerPlayer, "XP to nearby player", player.Name, "(distance:", math.floor(entry.distance), "studs)")
+							end
+						end
+					end
+				else
+					print("[EnemiesModule] WARNING: No nearby players found for", enemyName, "!")
+				end
 			end
 		end
-	end
 	
 	local ServerStorage = game:GetService("ServerStorage")
 	
 	-- Determine spawn position for drops
-	local dropSpawnPosition = root.Position + Vector3.new(0, -1, 0)
+	local dropSpawnPosition = root.Position + Vector3.new(0, -2, 0)
 	if lastDamagedByPlayer and lastDamagedByPlayer.Character then
 		local playerRoot = lastDamagedByPlayer.Character:FindFirstChild("HumanoidRootPart")
 		if playerRoot then
@@ -582,48 +664,52 @@ function EnemiesManager.Start(model)
 		tag.Value = "EnemyDrop"
 		tag.Parent = coin
 		
-		-- Destroy coin after 30 seconds if not collected
-		task.delay(30, function()
+		-- Store owner (player who dealt most damage) and drop time for pickup restriction
+		if lastDamagedByPlayer then
+			local ownerValue = Instance.new("ObjectValue")
+			ownerValue.Name = "DropOwner"
+			ownerValue.Value = lastDamagedByPlayer
+			ownerValue.Parent = coin
+			
+			local dropTimeValue = Instance.new("NumberValue")
+			dropTimeValue.Name = "DropTime"
+			dropTimeValue.Value = tick()
+			dropTimeValue.Parent = coin
+		end
+		
+		-- Transparency is handled client-side by ItemTransparencyHandler.client.lua
+		-- This allows each player to see different transparency based on ownership
+		
+		-- Destroy coin after 120 seconds if not collected
+		task.delay(120, function()
 			if coin and coin.Parent then
 				coin:Destroy()
 			end
 		end)
 	end
 	
-	-- Spawn item drops from enemy stats
+	-- Spawn item drops from enemy stats BEFORE destroying the enemy
 	if enemyStats and enemyStats.Drops then
-		local spawnedItems = ItemDropManager.SpawnEnemyDrops(enemyStats, dropSpawnPosition, lastDamagedByPlayer)
-		print("[EnemiesModule] Spawned " .. #spawnedItems .. " item drops for " .. slime.Name)
+		local success, err = pcall(function()
+			local spawnedItems = ItemDropManager.SpawnEnemyDrops(enemyStats, dropSpawnPosition, lastDamagedByPlayer)
+		end)
+		if not success then
+			warn("[EnemiesModule] Failed to spawn item drops: " .. tostring(err))
+		end
 	end
-			
-			-- Enable collision on all parts before breaking joints
-			local function enableCollisionRecursive(obj)
-				if not obj then return end
-				if obj:IsA("BasePart") then obj.CanCollide = true end
-				for _, child in ipairs(obj:GetChildren()) do enableCollisionRecursive(child) end
-			end
-			enableCollisionRecursive(slime)
-			
-			-- Set up collision group to prevent player collision
-			pcall(function() PhysicsService:RegisterCollisionGroup("DeadEnemies") end)
-			PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "DeadEnemies", true)
-			pcall(function() PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "Players", false) end)
-			
-			-- Add all slime parts to DeadEnemies group
-			local function addToDeadEnemiesGroup(obj)
-				if not obj then return end
-				if obj:IsA("BasePart") then 
-					obj.CollisionGroup = "DeadEnemies"
-				end
-				for _, child in ipairs(obj:GetChildren()) do addToDeadEnemiesGroup(child) end
-			end
-			addToDeadEnemiesGroup(slime)
-			slime.Humanoid:Destroy()
-			slime:BreakJoints()
+	
+	-- Wait a bit to ensure items are properly spawned before destroying the enemy
+	task.wait(0.5)
+	
+	-- -- Destroy humanoid and joints
+	-- if slime.Humanoid then
+	-- 	slime.Humanoid:Disconnect()
+	-- end
+	slime:BreakJoints()
 
-			task.wait(2)
-			slime:Destroy()
-			task.wait(15)
+	task.wait(2)
+	slime:Destroy()
+	task.wait(15)
 			local template = ServerStorage:FindFirstChild(enemyName)
 			if template then
 				local newSlime = template:Clone()
@@ -639,5 +725,61 @@ function EnemiesManager.Start(model)
 	end
 	task.spawn(moveTowardsTarget)
 end
+
+-- Auto-initialize all enemies in the workspace when module loads
+local Workspace = game:GetService("Workspace")
+
+local function findAndInitializeEnemies(parent)
+	for _, model in ipairs(parent:GetChildren()) do
+		-- Check if this is an enemy model (has Humanoid and HumanoidRootPart)
+		local hasHumanoid = model:FindFirstChild("Humanoid") ~= nil
+		local hasRootPart = model:FindFirstChild("HumanoidRootPart") ~= nil
+		
+		if hasHumanoid and hasRootPart then
+			-- Check if it's not a player character
+			local isPlayer = Players:FindFirstChild(model.Name) and Players:FindFirstChild(model.Name).Character == model
+			if not isPlayer then
+				-- Additional check: make sure Humanoid is actually a Humanoid object (not just something named Humanoid)
+				local humanoid = model:FindFirstChild("Humanoid")
+				if humanoid and humanoid:IsA("Humanoid") then
+					task.spawn(function()
+						-- Verify the model still exists and has proper structure before initializing
+						if model and model.Parent and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
+							EnemiesManager.Start(model)
+						end
+					end)
+				end
+			end
+		end
+		-- Recursively search subfolders
+		findAndInitializeEnemies(model)
+	end
+end
+
+findAndInitializeEnemies(Workspace)
+
+-- Also monitor for new models added to workspace (spawned enemies)
+Workspace.DescendantAdded:Connect(function(model)
+	local hasHumanoid = model:FindFirstChild("Humanoid") ~= nil
+	local hasRootPart = model:FindFirstChild("HumanoidRootPart") ~= nil
+	
+	if hasHumanoid and hasRootPart then
+		-- Check if it's not a player character
+		local isPlayer = Players:FindFirstChild(model.Name) and Players:FindFirstChild(model.Name).Character == model
+		if not isPlayer then
+			-- Additional check: make sure Humanoid is actually a Humanoid object
+			local humanoid = model:FindFirstChild("Humanoid")
+			if humanoid and humanoid:IsA("Humanoid") then
+				task.wait(0.1) -- Wait for model to fully load
+				task.spawn(function()
+					-- Verify the model still exists before initializing
+					if model and model.Parent and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
+						EnemiesManager.Start(model)
+					end
+				end)
+			end
+		end
+	end
+end)
 
 return EnemiesManager

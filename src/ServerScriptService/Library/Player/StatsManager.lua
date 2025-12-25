@@ -1,24 +1,20 @@
--- StatsManager.server.lua
+-- StatsManager.lua
 -- Manages player stat point allocation and upgrades
 -- All saves are delegated to UnifiedDataStoreManager
 
 local Players = game:GetService("Players")
-local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
-local statsStore = DataStoreService:GetDataStore("PlayerStats")
-
--- Throttle settings for stat saves (now managed by UnifiedDataStoreManager)
-local STAT_SAVE_THROTTLE = 8
-local lastStatSaveTime = {}
-local hasPendingStatSave = {}
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 
 -- Create RemoteEvent for stat allocation
-local statsUpdateEvent = Instance.new("RemoteEvent")
-statsUpdateEvent.Name = "AllocateStatPoint"
-statsUpdateEvent.Parent = ReplicatedStorage
+local statsUpdateEvent = ReplicatedStorage:FindFirstChild("AllocateStatPoint")
+if not statsUpdateEvent then
+	statsUpdateEvent = Instance.new("RemoteEvent")
+	statsUpdateEvent.Name = "AllocateStatPoint"
+	statsUpdateEvent.Parent = ReplicatedStorage
+end
 
 -- Stat costs (points per increase)
 local STAT_COST = 1
@@ -207,20 +203,13 @@ statsUpdateEvent.OnServerEvent:Connect(function(player, action, statType)
 	end
 end)
 
--- Periodically save pending stat changes
-local heartbeat = game:GetService("RunService").Heartbeat
-local lastHeartbeatSave = tick()
-heartbeat:Connect(function()
-	-- All pending changes are now handled by UnifiedDataStoreManager
-end)
-
 -- Cleanup on player leaving
 Players.PlayerRemoving:Connect(function(player)
 	-- Force save if pending - delegated to UnifiedDataStoreManager
 	UnifiedDataStoreManager.SaveAll(player, true)
-	
-	lastStatSaveTime[player.UserId] = nil
-	hasPendingStatSave[player.UserId] = nil
 end)
 
-print("[StatsManager] Stats Manager initialized. Listening for stat allocation requests...")
+return {
+	allocateStatPoint = allocateStatPoint,
+	resetStats = resetStats
+}

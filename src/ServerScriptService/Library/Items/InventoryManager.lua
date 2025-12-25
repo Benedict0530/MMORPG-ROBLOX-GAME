@@ -3,7 +3,7 @@ local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 local inventoryStore = DataStoreService:GetDataStore("PlayerInventory")
 
 local InventoryManager = {}
@@ -184,9 +184,8 @@ function InventoryManager.LoadInventory(player)
 		playerInventories[userId] = createDefaultInventory()
 	end
 	
-	-- Mark inventory as loaded
+	-- Mark inventory as loaded IMMEDIATELY
 	inventoriesLoaded[userId] = true
-	print("[InventoryManager] Inventory loaded and marked for player " .. player.Name)
 end
 
 -- Sync Backpack with inventory
@@ -196,7 +195,7 @@ function InventoryManager.SyncBackpack(player, character)
 		warn("[InventoryManager] Humanoid not found for " .. player.Name)
 		return
 	end
-	
+		
 	-- Remove all weapon tools from player
 	for _, tool in ipairs(player:GetChildren()) do
 		if tool:IsA("Tool") then
@@ -244,7 +243,6 @@ function InventoryManager.SyncBackpack(player, character)
 			equippedItemId = inventory[1].id
 			-- Save to player stats using helper function
 			setEquippedWeapon(player, equippedWeaponName, equippedItemId)
-			print(string.format("[InventoryManager] Auto-equipped '%s' (ID: %s) for %s", equippedWeaponName, equippedItemId, player.Name))
 		else
 			equippedWeaponName = "Twig"
 		end
@@ -269,7 +267,7 @@ function InventoryManager.SyncBackpack(player, character)
 			-- Store the unique item ID in the tool for trading/identification purposes
 			clone:SetAttribute("_ItemId", equippedItemId)
 			clone:SetAttribute("_OwnerUserId", player.UserId)
-			
+						
 			-- Wait longer for tool to fully replicate when multiple players join
 			task.wait(1.0)
 			
@@ -286,7 +284,6 @@ function InventoryManager.SyncBackpack(player, character)
 			-- Only proceed if we have a valid tool
 			if clone and clone.Parent == player then
 				equippedTool = clone
-				print(string.format("[InventoryManager] Created equipped tool: %s (ID: %s)", baseWeaponName, equippedItemId))
 			end
 		end
 	end
@@ -303,9 +300,9 @@ function InventoryManager.SyncBackpack(player, character)
 			return
 		end
 		
-		-- Verify humanoid still exists
-		if not humanoid or humanoid.Health <= 0 then
-			warn("[InventoryManager] Humanoid invalid before equipping for " .. player.Name)
+		-- Verify humanoid still exists and player is alive
+		if not humanoid or not character.Parent or humanoid.Health <= 0 then
+			warn("[InventoryManager] Humanoid invalid or character dead before equipping for " .. player.Name)
 			return
 		end
 		
@@ -318,20 +315,39 @@ function InventoryManager.SyncBackpack(player, character)
 		if not success then
 			warn("[InventoryManager] Failed to equip tool '" .. equippedTool.Name .. "' for " .. player.Name .. ": " .. tostring(err))
 		else
-			print("[InventoryManager] Successfully equipped tool '" .. equippedTool.Name .. "' for " .. player.Name)
 		end
 		
 		-- NOW connect the tool AFTER it's been equipped to the character
 		-- This ensures the tool is in the proper location before the event listener is set up
 		task.wait(0.5)
+		
+		-- Verify tool was actually equipped (fallback to re-equip if it failed)
+		if equippedTool and equippedTool.Parent ~= character then
+			local retrySuccess = pcall(function()
+				humanoid:EquipTool(equippedTool)
+			end)
+			if retrySuccess then
+				task.wait(0.5)
+			end
+		end
+		
 		if equippedTool and equippedTool.Parent == character then
+			-- Parent the "Left" + toolname part to the character when equipped
+			local baseWeaponName = equippedWeaponName:match("^([^_]+)") or equippedWeaponName
+			local leftPartName = "Left" .. baseWeaponName
+			local leftPart = equippedTool:FindFirstChild(leftPartName)
+			if leftPart then
+				-- Clone the entire leftPart (this preserves all children and welds)
+				local leftPartClone = leftPart:Clone()
+				leftPartClone.Parent = character
+			end
+			
 			local success2, err2 = pcall(function()
 				WeaponManager.ConnectTool(equippedTool, player)
 			end)
 			if not success2 then
 				warn("[InventoryManager] Failed to connect tool '" .. equippedTool.Name .. "' after equip for " .. player.Name .. ": " .. tostring(err2))
 			else
-				print("[InventoryManager] Successfully connected tool '" .. equippedTool.Name .. "' after equip for " .. player.Name)
 			end
 		else
 			warn("[InventoryManager] Tool is not in character after equipping for " .. player.Name)
@@ -348,68 +364,176 @@ function InventoryManager.GiveStartingItemsIfNew(player)
 	if #inventory < 1 then
 		-- New player detected, assign starting Twig with unique ID
 		InventoryManager.AddItem(player, "Twig")
+	else
+		print("[InventoryManager] Player already has items, skipping starting item")
 	end
 end
 
-
-Players.PlayerAdded:Connect(function(player)
-	-- Use task.spawn to ensure this doesn't block other PlayerAdded handlers
-	task.spawn(function()
-		-- Wait for PlayerDataStore to initialize stats
-	local ReplicatedStorage = game:GetService("ReplicatedStorage")
-	local playerSignalsFolder = ReplicatedStorage:WaitForChild("PlayerInitSignals", 10)
-	if not playerSignalsFolder then
-		warn("[InventoryManager] PlayerInitSignals folder not found for " .. player.Name)
-		return
-	end
+-- Initialize player inventory (called from Init.server.lua for existing players)
+function InventoryManager.InitializePlayer(player)
+	print("[InventoryManager] InitializePlayer called for " .. player.Name)
 	
-	local signalName = "Player_" .. player.UserId
-	-- Wait for stats ready signal
-	local statsReadySignal = playerSignalsFolder:WaitForChild(signalName, 10)
-	if not statsReadySignal then
-		warn("[InventoryManager] Stats ready signal not found for " .. player.Name)
-		return
-	end
-	
-	-- Check if signal was already fired (check _Fired flag)
-	local firedFlag = statsReadySignal:FindFirstChild("_Fired")
-	if not firedFlag or not firedFlag.Value then
-		-- Wait for stats ready signal to fire
-		statsReadySignal.Event:Wait()
-	end
-	-- Stats are now ready
-	
+	-- Load inventory
 	InventoryManager.LoadInventory(player)
+	
+	-- Give starting items if new
 	InventoryManager.GiveStartingItemsIfNew(player)
 	
-	-- Handle both existing character and future characters
+	-- Sync backpack if character exists
 	if player.Character then
-		-- Player has existing character, sync inventory
 		task.spawn(function()
-			task.wait(0.5) -- Wait for character to fully load
+			task.wait(0.5)
 			local humanoid = player.Character:FindFirstChild("Humanoid")
 			if humanoid and player.Character.Parent then
 				InventoryManager.SyncBackpack(player, player.Character)
 			end
 		end)
 	end
-	player.CharacterAdded:Connect(function(char)
-		-- Character spawned, sync inventory
-		task.spawn(function()
-			-- Cleanup old tool connections first
-			local WeaponManager = require(script.Parent.WeaponManager)
-			WeaponManager.CleanupPlayerTools(player)
+end
+
+
+-- Track last known character for each player to detect respawns
+local lastKnownCharacters = {}
+
+-- Server-wide character monitor
+task.spawn(function()
+	print("[InventoryManager] 🌍 Starting server-wide character monitor")
+	while true do
+		task.wait(0.5)
+		
+		for _, player in ipairs(Players:GetPlayers()) do
+			local currentChar = player.Character
+			local lastChar = lastKnownCharacters[player.UserId]
 			
-			local humanoid = char:WaitForChild("Humanoid", 5)
-			if not humanoid then
-				warn("[InventoryManager] Humanoid not found for " .. player.Name)
-				return
+			-- Detect respawn: character exists, is different from last known, and last was not nil
+			if currentChar and currentChar ~= lastChar and lastChar ~= nil then
+				print("[InventoryManager] ⚡⚡⚡ RESPAWN DETECTED for " .. player.Name)
+				lastKnownCharacters[player.UserId] = currentChar
+				
+				-- Trigger respawn sync
+				task.spawn(function()
+					print("[InventoryManager] 📌 Character loaded for " .. player.Name)
+					
+					local success, err = pcall(function()
+						-- Wait for humanoid to exist
+						local humanoid = currentChar:WaitForChild("Humanoid", 5)
+						if not humanoid then
+							warn("[InventoryManager] Humanoid not found for " .. player.Name .. " on respawn")
+							return
+						end
+						
+						print("[InventoryManager] ✅ Humanoid ready for " .. player.Name)
+						
+						-- Small delay to ensure character is fully loaded
+						task.wait(0.3)
+						
+						-- CRITICAL: Reload inventory from DataStore on respawn to get fresh data
+						print("[InventoryManager] 🔄 Reloading inventory from DataStore for respawn...")
+						InventoryManager.LoadInventory(player)
+						print("[InventoryManager] ✅ Inventory reloaded from DataStore for " .. player.Name)
+						
+						-- Cleanup old tool connections from WeaponManager
+						local WeaponManager = require(script.Parent.WeaponManager)
+						if WeaponManager.CleanupPlayerTools then
+							print("[InventoryManager] 🧹 Calling CleanupPlayerTools for " .. player.Name)
+							WeaponManager.CleanupPlayerTools(player)
+							print("[InventoryManager] 🧹 CleanupPlayerTools complete for " .. player.Name)
+						else
+							print("[InventoryManager] ⚠️ CleanupPlayerTools not found in WeaponManager")
+						end
+
+						-- Sync backpack
+						print("[InventoryManager] 🎯 Syncing backpack for " .. player.Name)
+						InventoryManager.SyncBackpack(player, currentChar)
+						print("[InventoryManager] ✅ SyncBackpack complete for " .. player.Name)
+					end)
+					
+					if not success then
+						warn("[InventoryManager] ❌ Error in respawn handler for " .. player.Name .. ": " .. tostring(err))
+					end
+				end)
+			elseif currentChar and lastChar == nil then
+				-- First time tracking this character (initial spawn)
+				lastKnownCharacters[player.UserId] = currentChar
 			end
-			task.wait(0.5) -- Wait for character replication before syncing
-			InventoryManager.SyncBackpack(player, char)
+		end
+	end
+end)
+
+Players.PlayerAdded:Connect(function(player)
+	print("[InventoryManager] ✓ PlayerAdded: " .. player.Name)
+	
+	-- Load and initialize inventory immediately
+	InventoryManager.LoadInventory(player)
+	InventoryManager.GiveStartingItemsIfNew(player)
+	
+	-- Handle initial character if it exists
+	if player.Character then
+		lastKnownCharacters[player.UserId] = player.Character
+		print("[InventoryManager] 🔄 Handling initial character for " .. player.Name)
+		
+		task.spawn(function()
+			local success, err = pcall(function()
+				-- Wait for humanoid
+				local humanoid = player.Character:WaitForChild("Humanoid", 5)
+				if not humanoid then
+					warn("[InventoryManager] Humanoid not found for " .. player.Name)
+					return
+				end
+				
+				task.wait(0.3)
+				
+				-- Cleanup old connections
+				local WeaponManager = require(script.Parent.WeaponManager)
+				if WeaponManager.CleanupPlayerTools then
+					WeaponManager.CleanupPlayerTools(player)
+				end
+				
+				-- Sync backpack
+				print("[InventoryManager] 🎯 Syncing initial backpack for " .. player.Name)
+				InventoryManager.SyncBackpack(player, player.Character)
+				print("[InventoryManager] ✅ Initial SyncBackpack complete for " .. player.Name)
+			end)
+			
+			if not success then
+				warn("[InventoryManager] ❌ Error syncing initial character for " .. player.Name .. ": " .. tostring(err))
+			end
 		end)
-	end)
-	end)
+	else
+		-- Character doesn't exist yet, wait for it
+		player.CharacterAdded:Connect(function(newCharacter)
+			lastKnownCharacters[player.UserId] = newCharacter
+			print("[InventoryManager] 🔄 Character loaded for " .. player.Name .. " (via CharacterAdded)")
+			
+			task.spawn(function()
+				local success, err = pcall(function()
+					-- Wait for humanoid
+					local humanoid = newCharacter:WaitForChild("Humanoid", 5)
+					if not humanoid then
+						warn("[InventoryManager] Humanoid not found for " .. player.Name)
+						return
+					end
+					
+					task.wait(0.3)
+					
+					-- Cleanup old connections
+					local WeaponManager = require(script.Parent.WeaponManager)
+					if WeaponManager.CleanupPlayerTools then
+						WeaponManager.CleanupPlayerTools(player)
+					end
+					
+					-- Sync backpack
+					print("[InventoryManager] 🎯 Syncing backpack for " .. player.Name)
+					InventoryManager.SyncBackpack(player, newCharacter)
+					print("[InventoryManager] ✅ SyncBackpack complete for " .. player.Name)
+				end)
+				
+				if not success then
+					warn("[InventoryManager] ❌ Error syncing character for " .. player.Name .. ": " .. tostring(err))
+				end
+			end)
+		end)
+	end
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -421,6 +545,7 @@ Players.PlayerRemoving:Connect(function(player)
 	inventoriesLoaded[player.UserId] = nil
 	lastInventorySaveTime[player.UserId] = nil
 	pendingInventoryChanges[player.UserId] = nil
+	lastKnownCharacters[player.UserId] = nil
 end)
 
 -- Heartbeat loop to batch and save pending inventory changes

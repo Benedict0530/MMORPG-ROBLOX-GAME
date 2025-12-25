@@ -1,4 +1,4 @@
--- ManaManagerHandler.server.lua
+-- ManaManagerHandler.lua
 -- Server-side handler for mana-related events
 -- Listens to player running state and manages mana drain
 
@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
 
-local ManaManager = require(ServerScriptService:WaitForChild("ManaManager"))
+local ManaManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("ManaManager"))
 
 -- Get or create the running event
 local runningEvent = ReplicatedStorage:FindFirstChild("PlayerRunning")
@@ -26,3 +26,5 @@ end)
 Players.PlayerRemoving:Connect(function(player)
 	ManaManager.CleanupPlayer(player)
 end)
+
+return {}

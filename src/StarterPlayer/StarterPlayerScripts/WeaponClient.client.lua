@@ -14,10 +14,12 @@ local lastAttackTimes = {} -- keys are tool instances
 local currentTool = nil
 local isSpaceHeld = false
 local attackLoopConnection = nil
+local attackCounter = 0 -- Track which attack animation to play
 
 -- Track event connections for cleanup
 local childAddedConnection
 local childRemovedConnection
+local attackButtonConnection
 
 local function setupCharacter(newCharacter)
 	-- Disconnect old connections
@@ -39,6 +41,11 @@ local function setupCharacter(newCharacter)
 			if idleAnimation and idleAnimation:IsA("Animation") then
 				local animator = humanoid:FindFirstChildOfClass("Animator")
 				if animator then
+					-- Stop all current animations first
+					for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+						track:Stop()
+					end
+					
 					local track = animator:LoadAnimation(idleAnimation)
 					track.Looped = true
 					track:Play()
@@ -75,11 +82,19 @@ local function performAttack(tool)
 		return
 	end
 	
-	-- Play Attack1 animation if it exists
-	local attackAnimation = tool:FindFirstChild("Attack1")
+	-- Alternate between Attack1 and Attack2 animations
+	attackCounter = attackCounter + 1
+	local attackAnimName = (attackCounter % 2 == 1) and "Attack1" or "Attack2"
+	local attackAnimation = tool:FindFirstChild(attackAnimName)
+	
 	if attackAnimation and attackAnimation:IsA("Animation") then
 		local animator = humanoid:FindFirstChildOfClass("Animator")
 		if animator then
+			-- Stop all currently playing animations
+			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+				track:Stop()
+			end
+			
 			local track = animator:LoadAnimation(attackAnimation)
 			track:Play()
 		end
@@ -108,6 +123,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 				return
 			end
 			
+			-- Check if player is alive
+			if not humanoid or humanoid.Health <= 0 then
+				return
+			end
+			
 			-- Check attack cooldown (matches server's cooldown logic: 1 / speed)
 			local weaponName = currentTool.Name
 			local now = tick()
@@ -133,3 +153,73 @@ UserInputService.InputEnded:Connect(function(input, gameProcessed)
 		end
 	end
 end)
+
+-- Setup attack button for mobile
+local function setupAttackButton()
+	local playerGui = player:WaitForChild("PlayerGui")
+	local gameGui = playerGui:FindFirstChild("GameGui")
+	if not gameGui then return end
+	
+	local frame = gameGui:FindFirstChild("Frame")
+	if not frame then return end
+	
+	local attackButton = frame:FindFirstChild("AttackButton")
+	if not attackButton then return end
+	
+	-- Show button only if touch is enabled
+	attackButton.Visible = UserInputService.TouchEnabled
+	
+	-- Disconnect old connection if any
+	if attackButtonConnection then
+		attackButtonConnection:Disconnect()
+	end
+	
+	-- Handle attack button down (start attacking)
+	attackButton.MouseButton1Down:Connect(function()
+		if not currentTool then return end
+		
+		isSpaceHeld = true
+		
+		-- Disconnect previous attack loop if any
+		if attackLoopConnection then
+			attackLoopConnection:Disconnect()
+		end
+		
+		-- Start attack loop while button is held
+		attackLoopConnection = game:GetService("RunService").Heartbeat:Connect(function()
+			if not isSpaceHeld or not currentTool then
+				return
+			end
+			
+			-- Check if player is alive
+			if not humanoid or humanoid.Health <= 0 then
+				return
+			end
+			
+			-- Check attack cooldown (matches server's cooldown logic: 1 / speed)
+			local weaponName = currentTool.Name
+			local now = tick()
+			local lastAttack = lastAttackTimes[weaponName] or 0
+			local weaponStats = WeaponData.GetWeaponStats(weaponName)
+			local speed = weaponStats and weaponStats.speed or 1 -- Default speed if weapon not found
+			
+			if (now - lastAttack) >= speed then
+				lastAttackTimes[weaponName] = now
+				performAttack(currentTool)
+			end
+		end)
+	end)
+	
+	-- Handle attack button up (stop attacking)
+	attackButton.MouseButton1Up:Connect(function()
+		isSpaceHeld = false
+		if attackLoopConnection then
+			attackLoopConnection:Disconnect()
+			attackLoopConnection = nil
+		end
+	end)
+end
+
+-- Setup attack button after player GUI is loaded
+task.wait(0.5)
+setupAttackButton()

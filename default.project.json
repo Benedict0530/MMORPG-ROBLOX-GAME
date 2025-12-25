@@ -23,7 +23,13 @@
     "ServerScriptService": {
       "$className": "ServerScriptService",
       "$ignoreUnknownInstances": true,
-      "$path": "src/ServerScriptService"
+      "Init": {
+        "$path": "src/ServerScriptService/Init.server.lua"
+      },
+      "Library": {
+        "$className": "Folder",
+        "$path": "src/ServerScriptService/Library"
+      }
     },
     "ServerStorage": {
       "$className": "ServerStorage",

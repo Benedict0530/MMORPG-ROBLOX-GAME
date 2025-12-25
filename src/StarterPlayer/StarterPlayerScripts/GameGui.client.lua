@@ -9,10 +9,12 @@ local playerGui = player:WaitForChild("PlayerGui")
 game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 
 -- Hide default Roblox health bar immediately
-local healthGui = playerGui:WaitForChild("HealthGui", 5)
-if healthGui then
-	healthGui.Enabled = false
-end
+pcall(function()
+	local healthGui = playerGui:WaitForChild("HealthGui", 5)
+	if healthGui then
+		healthGui.Enabled = false
+	end
+end)
 
 -- ============ CONSTANTS ============
 local DEFAULT_NEEDED_EXP = 10
@@ -87,8 +89,10 @@ local function updateHealthBar(value)
 end
 
 local function updateManaBar(value)
+	if not manaBar then return end
 	if not maxMana or maxMana.Value <= 0 then return end
-	manaBar.Size = UDim2.new(value / maxMana.Value, 0, 1, 0)
+	local manaPercent = math.max(0, math.min(value / maxMana.Value, 1))
+	manaBar.Size = UDim2.new(manaPercent, 0, 1, 0)
 end
 
 local function updateExperienceBar()
@@ -256,6 +260,53 @@ local function showDamageText(targetPart, damageAmount, isEnemy, isCritical)
 	end)
 end
 
+-- ============ EXPERIENCE TEXT DISPLAY ============
+local function showExperienceText(expAmount)
+	if not character then return end
+	
+	local targetPart = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+	if not targetPart or not targetPart.Parent then return end
+	
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.new(4, 0, 2, 0)
+	billboard.StudsOffset = Vector3.new(0, DAMAGE_TEXT_HEIGHT + 3, 0)
+	billboard.MaxDistance = 999999
+	billboard.Parent = targetPart
+	
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "ExperienceText"
+	textLabel.Size = UDim2.new(1, 0, 1, 0)
+	textLabel.BackgroundTransparency = 1
+	textLabel.Text = "+" .. formatNumberWithCommas(expAmount) .. " XP"
+	textLabel.TextScaled = false
+	textLabel.Font = Enum.Font.FredokaOne
+	textLabel.TextSize = 24
+	textLabel.TextColor3 = Color3.fromRGB(255, 254, 254) -- White
+	textLabel.Parent = billboard
+	
+	local textStroke = Instance.new("UIStroke")
+	textStroke.Color = Color3.fromRGB(84, 84, 84) -- Gray stroke
+	textStroke.Thickness = 2
+	textStroke.Parent = textLabel
+	
+	local startTime = tick()
+	local connection
+	connection = RunService.RenderStepped:Connect(function()
+		local elapsed = tick() - startTime
+		local progress = math.min(elapsed / DAMAGE_TEXT_DURATION, 1)
+		
+		-- Float upward like damage text
+		billboard.StudsOffset = Vector3.new(0, DAMAGE_TEXT_HEIGHT + 3 + (progress * DAMAGE_TEXT_RISE), 0)
+		textLabel.TextTransparency = progress
+		textStroke.Transparency = progress
+		
+		if progress >= 1 then
+			connection:Disconnect()
+			billboard:Destroy()
+		end
+	end)
+end
+
 
 
 local function updateHealthWithDamage(value)
@@ -263,25 +314,75 @@ local function updateHealthWithDamage(value)
 	updateHealthBar(value)
 end
 
+-- ============ EXPERIENCE GAIN TRACKING ============
+local lastExperienceValue = 0
+
+local function onExperienceGained(value)
+	-- Calculate how much XP was gained this tick
+	local expGained = value - lastExperienceValue
+	lastExperienceValue = value
+	
+	-- Show floating experience text if gained XP (ignore first load which might be large jump)
+	if expGained > 0 then
+		showExperienceText(expGained)
+	end
+	
+	updateExperienceBar()
+end
+
 -- ============ UI SETUP ============
 local function getUIElements()
 	local gui = playerGui:WaitForChild("GameGui", WAIT_TIMEOUT)
+	if not gui then 
+		warn("[GameGui] GameGui not found in PlayerGui!")
+		return nil 
+	end
+	
 	local frame = gui:WaitForChild("Frame", WAIT_TIMEOUT)
+	if not frame then 
+		warn("[GameGui] Frame not found in GameGui!")
+		return nil 
+	end
 	
-	local uiElements = {
-		healthBar = frame:WaitForChild("Health", WAIT_TIMEOUT):WaitForChild("HealthBar", WAIT_TIMEOUT),
-		manaBar = frame:WaitForChild("Mana", WAIT_TIMEOUT):WaitForChild("ManaBar", WAIT_TIMEOUT),
-		coins = frame:WaitForChild("Coins", WAIT_TIMEOUT),
-		levelText = frame:WaitForChild("Level", WAIT_TIMEOUT),
-		experienceBar = frame:WaitForChild("Experience", WAIT_TIMEOUT):WaitForChild("ExperienceBar", WAIT_TIMEOUT),
-		experienceText = frame:WaitForChild("Experience", WAIT_TIMEOUT):WaitForChild("Text", WAIT_TIMEOUT),
-	}
+	local uiElements = {}
 	
-	for name, element in pairs(uiElements) do
-		if not element then
-			warn("UI element not found: " .. name)
-			return nil
-		end
+	-- Try to get each UI element with error handling
+	local health = frame:WaitForChild("Health", WAIT_TIMEOUT)
+	if health then
+		uiElements.healthBar = health:WaitForChild("HealthBar", WAIT_TIMEOUT)
+		if not uiElements.healthBar then warn("[GameGui] HealthBar not found") end
+	else
+		warn("[GameGui] Health container not found")
+	end
+	
+	local mana = frame:WaitForChild("Mana", WAIT_TIMEOUT)
+	if mana then
+		uiElements.manaBar = mana:WaitForChild("ManaBar", WAIT_TIMEOUT)
+		if not uiElements.manaBar then warn("[GameGui] ManaBar not found") end
+	else
+		warn("[GameGui] Mana container not found")
+	end
+	
+	uiElements.coins = frame:WaitForChild("Coins", WAIT_TIMEOUT)
+	if not uiElements.coins then warn("[GameGui] Coins text not found") end
+	
+	uiElements.levelText = frame:WaitForChild("Level", WAIT_TIMEOUT)
+	if not uiElements.levelText then warn("[GameGui] Level text not found") end
+	
+	local experience = frame:WaitForChild("Experience", WAIT_TIMEOUT)
+	if experience then
+		uiElements.experienceBar = experience:WaitForChild("ExperienceBar", WAIT_TIMEOUT)
+		uiElements.experienceText = experience:WaitForChild("Text", WAIT_TIMEOUT)
+		if not uiElements.experienceBar then warn("[GameGui] ExperienceBar not found") end
+		if not uiElements.experienceText then warn("[GameGui] Experience text not found") end
+	else
+		warn("[GameGui] Experience container not found")
+	end
+	
+	-- Check if we got at least some elements
+	if not uiElements.healthBar and not uiElements.manaBar then
+		warn("[GameGui] Critical: Could not load health/mana bars!")
+		return nil
 	end
 	
 	return uiElements
@@ -304,7 +405,7 @@ local function getStatValues()
 	neededExperience = stats:WaitForChild("NeededExperience", WAIT_TIMEOUT)
 	
 	if not (money and level and maxHealth and currentHealth and maxMana and currentMana and experience and neededExperience) then
-		warn("Missing stat values!")
+		warn("Missing stat values! Money:" .. tostring(money ~= nil) .. " Level:" .. tostring(level ~= nil) .. " MaxHealth:" .. tostring(maxHealth ~= nil) .. " CurrentHealth:" .. tostring(currentHealth ~= nil))
 		return false
 	end
 	
@@ -326,6 +427,28 @@ local function resetStatsRequest()
 		statsUpdateEvent:FireServer("Reset")
 	else
 		warn("[GameGui] AllocateStatPoint event not found")
+	end
+end
+
+-- ============ THUMBSTICK VISIBILITY FUNCTION ============
+local function updateThumbstickVisibility()
+	local thumbstickGui = playerGui:FindFirstChild("ThumbstickGui")
+	if not thumbstickGui then return end
+	
+	-- Get UI state
+	local statsInfo = gameGuiFrame and gameGuiFrame:FindFirstChild("StatsInfo")
+	local inventoryUI = gameGuiFrame and gameGuiFrame:FindFirstChild("InventoryUI")
+	
+	-- Check if either UI is visible
+	local statsInfoOpen = statsInfo and statsInfo.Visible or false
+	local inventoryUIOpen = inventoryUI and inventoryUI.Visible or false
+	
+	-- Disable thumbstick if either UI is open, otherwise enable if touch is enabled
+	local UserInputService = game:GetService("UserInputService")
+	if statsInfoOpen or inventoryUIOpen then
+		thumbstickGui.Enabled = false
+	else
+		thumbstickGui.Enabled = UserInputService.TouchEnabled
 	end
 end
 
@@ -369,8 +492,11 @@ local function setupCharacter(newCharacter)
 	connections.currentMana = currentMana.Changed:Connect(updateManaBar)
 	connections.maxMana = maxMana.Changed:Connect(updateManaBar)
 	connections.level = level.Changed:Connect(updateLevel)
-	connections.experience = experience.Changed:Connect(updateExperienceBar)
+	connections.experience = experience.Changed:Connect(onExperienceGained)
 	connections.neededExperience = neededExperience.Changed:Connect(updateExperienceBar)
+	
+	-- Initialize last experience value for delta tracking
+	lastExperienceValue = experience.Value
 	
 	-- Connect stat changes to StatsInfo updates
 	local attack = stats:FindFirstChild("Attack")
@@ -407,6 +533,8 @@ local function setupCharacter(newCharacter)
 		if characterButton and statsInfo then
 			connections.characterButton = characterButton.MouseButton1Click:Connect(function()
 				statsInfo.Visible = not statsInfo.Visible
+				-- Update thumbstick visibility
+				updateThumbstickVisibility()
 			end)
 		end
 	end
@@ -418,6 +546,8 @@ local function setupCharacter(newCharacter)
 		if inventoryButton and inventoryUI then
 			connections.inventoryButton = inventoryButton.MouseButton1Click:Connect(function()
 				inventoryUI.Visible = not inventoryUI.Visible
+				-- Update thumbstick visibility
+				updateThumbstickVisibility()
 			end)
 		end
 	end

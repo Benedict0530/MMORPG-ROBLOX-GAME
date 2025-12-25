@@ -1,18 +1,11 @@
--- LevelSystem.server.lua
+-- LevelSystem.lua
 -- Handles player leveling up based on experience
 -- All saves are delegated to UnifiedDataStoreManager
 
 local Players = game:GetService("Players")
-local DataStoreService = game:GetService("DataStoreService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
-local statsStore = DataStoreService:GetDataStore("PlayerStats")
-
--- Throttle settings (managed by UnifiedDataStoreManager)
-local SAVE_THROTTLE_INTERVAL = 8 -- Save at most every 8 seconds to avoid DataStore queue overflow
-local lastSaveTime = {}
-local hasPendingExperienceSave = {}
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 
 -- Function to save level and experience to datastore (throttled)
 local function saveLevelToDataStore(player, level, experience, neededExperience, reason)
@@ -105,17 +98,13 @@ for _, player in ipairs(Players:GetPlayers()) do
 	setupLevelMonitoring(player)
 end
 
--- Periodic check: Save pending experience every second if needed (and throttle allows)
-game:GetService("RunService").Heartbeat:Connect(function()
-	-- All pending changes are now handled by UnifiedDataStoreManager
-end)
-
 -- Cleanup on player disconnect
 Players.PlayerRemoving:Connect(function(player)
 	-- Force save all data - delegated to UnifiedDataStoreManager
 	UnifiedDataStoreManager.SaveAll(player, true)
-	
-	-- Clear tracking tables
-	lastSaveTime[player.UserId] = nil
-	hasPendingExperienceSave[player.UserId] = nil
 end)
+
+return {
+	checkLevelUp = checkLevelUp,
+	setupLevelMonitoring = setupLevelMonitoring
+}

@@ -1,4 +1,4 @@
--- PlayerDataStore.server.lua
+-- PlayerDataStore.lua
 -- Loads player stats on join and sets up collision groups
 -- All saves are now handled by UnifiedDataStoreManager
 
@@ -8,7 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PhysicsService = game:GetService("PhysicsService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("UnifiedDataStoreManager"))
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 local statsStore = DataStoreService:GetDataStore("PlayerStats")
 
 -- Create or get Players collision group
@@ -41,25 +41,6 @@ end
 -- Track which players have stats ready
 local playersStatsReady = {} -- Maps userId -> true
 
-local function waitForStatsReady(userId)
-	-- If already ready, return immediately
-	if playersStatsReady[userId] then
-		return
-	end
-	
-	-- Otherwise wait for the signal
-	local signalName = "Player_" .. userId
-	local signal = playerSignalsFolder:FindFirstChild(signalName)
-	if not signal then
-		signal = Instance.new("BindableEvent")
-		signal.Name = signalName
-		signal.Parent = playerSignalsFolder
-	end
-	
-	-- Wait for signal to fire
-	signal.Event:Wait()
-end
-
 local function getStatsReadySignal(userId)
 	local signalName = "Player_" .. userId
 	local signal = playerSignalsFolder:FindFirstChild(signalName)
@@ -88,38 +69,6 @@ local DEFAULT_STATS = {
 	Equipped = { name = "", id = "" },
 	ResetPoints = 1
 }
-
-local function loadStats(player)
-	local key = "Player_" .. player.UserId
-	local data
-	local success, err = pcall(function()
-		data = statsStore:GetAsync(key)
-	end)
-	if success and data then
-		return data
-	else
-		return table.clone(DEFAULT_STATS)
-	end
-end
-
--- Throttle settings for DataStore saves
-local SAVE_THROTTLE_INTERVAL = 8 -- Save every 8 seconds max
-local lastSaveTime = {}
-local pendingStatChanges = {}
-
-local function saveStats(player, forceImmediate)
-	-- Delegate to UnifiedDataStoreManager
-	UnifiedDataStoreManager.SaveStats(player, forceImmediate)
-end
-
--- Export throttled save function so other scripts can use it
-local PlayerDataStoreModule = {}
-function PlayerDataStoreModule.throttledSave(player)
-	saveStats(player, false)
-end
-function PlayerDataStoreModule.forceSave(player)
-	saveStats(player, true)
-end
 
 local function setupStatsFolder(player, data)
 	local statsFolder = Instance.new("Folder")
@@ -289,7 +238,6 @@ Players.PlayerAdded:Connect(function(player)
 					local charPos = humanoidRootPart.Position
 					-- Position at spawn location, slightly above the part
 					humanoidRootPart.CFrame = CFrame.new(spawnPos.X, spawnPos.Y, spawnPos.Z + 5)
-					print("[PlayerDataStore] Positioned " .. player.Name .. " at spawn location Z: " .. spawnPos.Z)
 				end
 			end
 			
@@ -332,19 +280,16 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-	saveStats(player, true) -- Force immediate save on disconnect
+	UnifiedDataStoreManager.SaveStats(player, true)
 end)
 
 -- Optionally, save all players on server shutdown
 if game:IsA("DataModel") then
 	game:BindToClose(function()
 		for _, player in ipairs(Players:GetPlayers()) do
-			saveStats(player, true)
+			UnifiedDataStoreManager.SaveStats(player, true)
 		end
 	end)
 end
 
--- Periodic check for pending changes (every 1 second, only save if changes pending and interval passed)
-game:GetService("RunService").Heartbeat:Connect(function()
-	-- All pending changes are now handled by UnifiedDataStoreManager
-end)
+return PlayerDataStore

@@ -39,6 +39,19 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 	local item = itemTemplate:Clone()
 	item.Parent = workspace
 	
+	-- Store owner (player who dealt most damage) and drop time for pickup restriction
+	if enemyDefeatedByPlayer then
+		local ownerValue = Instance.new("ObjectValue")
+		ownerValue.Name = "DropOwner"
+		ownerValue.Value = enemyDefeatedByPlayer
+		ownerValue.Parent = item
+		
+		local dropTimeValue = Instance.new("NumberValue")
+		dropTimeValue.Name = "DropTime"
+		dropTimeValue.Value = tick()
+		dropTimeValue.Parent = item
+	end
+	
 	-- Set primary part if not already set
 	local primaryPart = item:FindFirstChild("HumanoidRootPart") or item:FindFirstChild("PrimaryPart")
 	if not primaryPart then
@@ -131,8 +144,9 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		itemNameValue.Value = itemName
 	end
 	
-	print("[ItemDropManager] Tagged drop '" .. itemName .. "' with ItemType: " .. tag.Value .. ", ItemName: " .. itemNameValue.Value)
-	
+	-- Transparency is handled client-side by ItemTransparencyHandler.client.lua
+	-- This allows each player to see different transparency based on ownership
+		
 	-- Destroy item after 30 seconds if not collected
 	task.delay(30, function()
 		if item and item.Parent then
@@ -140,7 +154,6 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		end
 	end)
 	
-	print("[ItemDropManager] Spawned drop: " .. itemName .. " at position " .. tostring(finalSpawnPosition))
 	return item
 end
 

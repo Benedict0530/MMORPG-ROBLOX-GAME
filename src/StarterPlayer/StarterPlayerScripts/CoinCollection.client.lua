@@ -7,6 +7,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
+local pickupButton = nil
 
 -- Get or wait for RemoteEvent
 local function getCollectRemote()
@@ -62,6 +63,73 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		end
 	end
 end)
+
+-- Function to collect nearest item
+local function collectNearestItem()
+	local character = player.Character
+	if not character or not character:FindFirstChild("HumanoidRootPart") then
+		return
+	end
+	
+	local playerRoot = character.HumanoidRootPart
+	
+	-- Find the closest collectible item (coins or drops)
+	local closestItem = nil
+	local closestDistance = COLLECT_DISTANCE
+	
+	for _, item in ipairs(workspace:GetChildren()) do
+		-- Check for coins or item drops
+		if item:FindFirstChild("CoinType") or item:FindFirstChild("ItemType") then
+			-- Use GetPivot() which works on both parts and models
+			local itemPivot = item:GetPivot()
+			if itemPivot then
+				local distance = (itemPivot.Position - playerRoot.Position).Magnitude
+				if distance <= closestDistance then
+					closestDistance = distance
+					closestItem = item
+				end
+			end
+		end
+	end
+	
+	-- Collect the closest item
+	if closestItem then
+		local remote = getCollectRemote()
+		if remote then
+			remote:FireServer(closestItem)
+		end
+	end
+end
+
+-- Setup pickup button for mobile
+local function setupPickupButton()
+	-- Only setup if touch is enabled
+	if not UserInputService.TouchEnabled then return end
+	
+	local playerGui = player:WaitForChild("PlayerGui")
+	local gameGui = playerGui:FindFirstChild("GameGui")
+	if not gameGui then return end
+	
+	local frame = gameGui:FindFirstChild("Frame")
+	if not frame then return end
+	
+	pickupButton = frame:FindFirstChild("PickupButton")
+	if not pickupButton then return end
+	
+	-- Handle pickup button click
+	pickupButton.MouseButton1Click:Connect(function()
+		-- Prevent multiple collections in quick succession
+		if collectDebounce then return end
+		collectDebounce = true
+		task.delay(COLLECT_COOLDOWN, function() collectDebounce = false end)
+		
+		collectNearestItem()
+	end)
+end
+
+-- Setup pickup button after player GUI is loaded
+task.wait(0.5)
+setupPickupButton()
 
 -- Update character reference on respawn
 player.CharacterAdded:Connect(function(newCharacter)

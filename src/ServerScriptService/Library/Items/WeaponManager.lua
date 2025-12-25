@@ -1,13 +1,14 @@
 -- WeaponManager.lua
 -- Handles weapon/tool usage: animations, sounds, effects
 
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
+
 local WeaponData = require(ReplicatedStorage.Modules.WeaponData)
-local WeaponDataStore = require(script.Parent.WeaponDataStore)
-local EnemyStatsDataStore = require(script.Parent.Parent.Enemies.EnemyStatsDataStore)
-local DamageManager = require(script.Parent.Parent.DamageManager)
+local WeaponDataStore = require(script.Parent:WaitForChild("WeaponDataStore"))
+local EnemyStatsDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("EnemyStatsDataStore"))
+local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
 
 -- Create RemoteEvent for showing enemy damage text on clients
 local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
@@ -16,8 +17,6 @@ if not damageEvent then
 	damageEvent.Name = "EnemyDamage"
 	damageEvent.Parent = ReplicatedStorage
 end
-
-
 
 local lastAttackTimes = {} -- keys are player instances
 local WeaponManager = {}
@@ -34,8 +33,6 @@ local function getOrCreateEnemyHealth(enemyModel, enemyStats)
 	return enemyHealth
 end
 
-
-
 -- Modular attack logic for each weapon
 function WeaponManager.PerformAttack(player, tool)
 	if not player or not tool or not tool.Name then 
@@ -43,7 +40,6 @@ function WeaponManager.PerformAttack(player, tool)
 		return 
 	end
 	
-	print("[WeaponManager] PerformAttack called for player " .. player.Name .. " with tool " .. tool.Name)
 	local character = player.Character
 	if not character then
 		warn("[WeaponManager] Player " .. player.Name .. " has no character.")
@@ -66,7 +62,6 @@ function WeaponManager.PerformAttack(player, tool)
 	local now = tick()
 	local lastAttack = lastAttackTimes[player] or 0
 	if (now - lastAttack) < (speed) then
-		warn("[WeaponManager] " .. player.Name .. " tried to attack too quickly with " .. weaponName)
 		return
 	end
 	lastAttackTimes[player] = now
@@ -114,11 +109,8 @@ function WeaponManager.PerformAttack(player, tool)
 			damageEvent:FireAllClients(enemyModel, damage, isCritical, true)
 			
 			local critText = isCritical and " [CRITICAL]" or ""
-			print(string.format("[WeaponManager] %s hit enemy '%s' for %d damage%s. HP: %d/%d (Attack: %d, Weapon: %s, Dex: %d)", 
-				player.Name, enemyName, damage, critText, enemyHealth.Value, enemyStats and enemyStats.Health or 1, baseDamage, weaponName, dexterity))
 			
 			if enemyHealth.Value <= 0 then
-				print(string.format("[WeaponManager] Enemy '%s' defeated by %s", enemyName, player.Name))
 				local humanoid = enemyModel:FindFirstChild("Humanoid")
 				if humanoid then humanoid.Health = 0 end
 				-- Mark enemy as dead to prevent further damage
@@ -147,7 +139,6 @@ local function cleanupPlayerToolConnections(player)
 			if toolConnections[toolId] then
 				toolConnections[toolId]:Disconnect()
 				toolConnections[toolId] = nil
-				print("[WeaponManager] Disconnected old tool: " .. toolId)
 			end
 		end
 		playerToolIds[userId] = {}
@@ -167,7 +158,6 @@ function WeaponManager.ConnectTool(tool, player)
 	end
 	
 	-- Get or create unique ID for this tool instance
-	-- Use player ID + item ID to ensure uniqueness across all players
 	local itemId = tool:GetAttribute("_ItemId") or ""
 	local uniqueToolId = player.UserId .. "_" .. itemId
 	
@@ -182,12 +172,10 @@ function WeaponManager.ConnectTool(tool, player)
 		return
 	end
 	
-	print("[WeaponManager] Connecting tool '" .. tool.Name .. "' with unique ID: " .. uniqueToolId .. " for player " .. player.Name)
 	
 	-- Wait for SwingEvent to exist (with timeout)
 	local swingEvent = tool:FindFirstChild("SwingEvent")
 	if not swingEvent then
-		print("[WeaponManager] SwingEvent not found immediately, waiting for tool '" .. tool.Name .. "' to be ready...")
 		swingEvent = tool:WaitForChild("SwingEvent", 5)
 	end
 	
@@ -209,7 +197,6 @@ function WeaponManager.ConnectTool(tool, player)
 		end
 		
 		-- Verify tool still exists and is owned by the player
-		-- Tool can be in: Player, Backpack, or Character depending on equipped state
 		if not tool or not tool.Parent then
 			warn("[WeaponManager] Tool no longer exists")
 			return
@@ -229,7 +216,6 @@ function WeaponManager.ConnectTool(tool, player)
 			return
 		end
 		
-		print("[WeaponManager] SwingEvent triggered for player " .. attackingPlayer.Name .. " with tool " .. tool.Name)
 		WeaponManager.PerformAttack(attackingPlayer, tool)
 	end)
 	
@@ -240,17 +226,6 @@ function WeaponManager.ConnectTool(tool, player)
 	playerToolIds[player.UserId] = playerToolIds[player.UserId] or {}
 	table.insert(playerToolIds[player.UserId], uniqueToolId)
 	
-	print("[WeaponManager] Successfully connected tool '" .. tool.Name .. "' (ID: " .. uniqueToolId .. ") to player " .. player.Name)
-end
-
--- Utility: Connect all tools in ReplicatedStorage.Weapons
-function WeaponManager.ConnectAllWeapons()
-	local weaponsFolder = ReplicatedStorage:FindFirstChild("Weapons")
-	if weaponsFolder then
-		for _, tool in ipairs(weaponsFolder:GetChildren()) do
-			WeaponManager.ConnectTool(tool)
-		end
-	end
 end
 
 -- Cleanup: Called when player respawns or disconnects
@@ -258,8 +233,6 @@ function WeaponManager.CleanupPlayerTools(player)
 	if not player then return end
 	cleanupPlayerToolConnections(player)
 	playerToolIds[player.UserId] = nil
-	print("[WeaponManager] Cleaned up all tools for player " .. player.Name)
 end
-
 
 return WeaponManager

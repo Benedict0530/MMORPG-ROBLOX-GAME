@@ -98,8 +98,6 @@ function ManaManager.SetRunning(player, isRunning)
 	local previousState = playerRunningState[player.UserId] or false
 	if previousState ~= isRunning then
 		playerRunningState[player.UserId] = isRunning
-	else
-		-- Log when we try to set the same state (for debugging)
 	end
 end
 
@@ -119,13 +117,8 @@ function ManaManager.ConsumeMana(player, amount)
 	if currentMana.Value >= amount then
 		local oldMana = currentMana.Value
 		currentMana.Value = currentMana.Value - amount
-		print(string.format("[ManaManager] %s consumed mana: %.2f -> %.2f (spent %.2f)", 
-			player.Name, oldMana, currentMana.Value, amount))
 		return true
 	end
-	
-	print(string.format("[ManaManager] %s INSUFFICIENT mana for ability! Required: %.2f, Current: %.2f", 
-		player.Name, amount, currentMana.Value))
 	return false
 end
 

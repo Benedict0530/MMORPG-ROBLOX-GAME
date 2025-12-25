@@ -10,6 +10,18 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- Load WeaponData
 local WeaponData = require(ReplicatedStorage.Modules.WeaponData)
 
+-- Track event connections for cleanup
+local connections = {}
+
+local function disconnectAll()
+	for _, connection in pairs(connections) do
+		if connection then
+			connection:Disconnect()
+		end
+	end
+	table.clear(connections)
+end
+
 -- Wait for GameGui and InventoryUI to load
 local gameGui = playerGui:WaitForChild("GameGui", 5)
 if not gameGui then
@@ -55,6 +67,7 @@ itemTemplate.Visible = false
 local itemStats = inventoryUI:WaitForChild("Background"):WaitForChild("ItemStats", 10)
 if not itemStats then
 	warn("[InventoryUI] ItemStats not found in InventoryUI after 10 second wait - will skip stats display")
+	itemStats = nil
 else
 	itemStats.Visible = false -- Initially hidden
 end
@@ -68,6 +81,11 @@ end
 
 -- Function to get weapon image from weapon data
 local function getWeaponImage(weaponName)
+	if not weaponName then
+		warn("[InventoryUI] Weapon name is nil!")
+		return ""
+	end
+	
 	local weaponStats = WeaponData.GetWeaponStats(weaponName)
 	if not weaponStats then
 		warn("[InventoryUI] Weapon '" .. weaponName .. "' not found in WeaponData")
@@ -87,6 +105,7 @@ end
 
 -- Function to create inventory item UI
 local function createInventoryItem(itemData, index)
+	
 	local itemClone = itemTemplate:Clone()
 	
 	itemClone.Name = "Item_" .. index
@@ -136,6 +155,7 @@ local function createInventoryItem(itemData, index)
 	
 	-- Add click handler to show item stats
 	itemClone.MouseButton1Click:Connect(function()
+		
 		-- Use the itemStats reference from module scope
 		if not itemStats then 
 			warn("[InventoryUI] ItemStats not available")
@@ -174,7 +194,7 @@ local function createInventoryItem(itemData, index)
 end
 
 -- Function to refresh inventory display
-local function refreshInventory()
+local function refreshInventory()	
 	-- Clear existing items (keep template)
 	for _, child in ipairs(scrollingFrame:GetChildren()) do
 		if child ~= itemTemplate and child.Name:match("^Item_") then
@@ -189,44 +209,88 @@ local function refreshInventory()
 		return
 	end
 	
-	-- Get inventory from server via RemoteFunction (we'll create this if needed)
-	-- For now, we'll access the InventoryManager via a request
+	-- Get inventory from server via RemoteFunction with retry logic
 	local inventoryEvent = ReplicatedStorage:FindFirstChild("GetPlayerInventory")
 	if not inventoryEvent then
-		inventoryEvent = Instance.new("RemoteFunction")
-		inventoryEvent.Name = "GetPlayerInventory"
-		inventoryEvent.Parent = ReplicatedStorage
+		inventoryEvent = ReplicatedStorage:WaitForChild("GetPlayerInventory", 10)
+		if not inventoryEvent then
+			warn("[InventoryUI] GetPlayerInventory RemoteFunction never appeared!")
+			return
+		end
 	end
 	
-	-- Request inventory from server
-	local success, inventoryData = pcall(function()
-		return inventoryEvent:InvokeServer()
-	end)
+	-- Request inventory from server with retry
+	local inventoryData = nil
+	local retries = 0
+	local maxRetries = 10
 	
-	if not success then
-		warn("[InventoryUI] Failed to get inventory from server: " .. tostring(inventoryData))
-		return
+	while not inventoryData and retries < maxRetries do
+		local success, result = pcall(function()
+			return inventoryEvent:InvokeServer()
+		end)
+		
+		if success and result then
+			inventoryData = result
+			break
+		else
+			retries = retries + 1
+			if retries < maxRetries then
+				task.wait(0.2)
+			else
+				warn("[InventoryUI] Failed to get inventory after " .. maxRetries .. " attempts: " .. tostring(result))
+				return
+			end
+		end
 	end
 	
 	if not inventoryData or #inventoryData == 0 then
 		return
 	end
-	
+		
 	-- Create UI items for each inventory item
 	for index, itemData in ipairs(inventoryData) do
-		createInventoryItem(itemData, index)
+		if itemData and itemData.name then
+			createInventoryItem(itemData, index)
+		else
+			warn("[InventoryUI] Invalid item data at index " .. index)
+		end
+	end
+	
+end
+
+-- Initial refresh (wait a moment for server to be ready)
+task.wait(1)
+refreshInventory()
+
+-- Setup inventory change listener
+local function setupInventoryListener()
+	disconnectAll()
+	
+	local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
+	if inventoryChangedEvent then
+		connections.inventoryChanged = inventoryChangedEvent.OnClientEvent:Connect(function()
+			refreshInventory()
+		end)
+	else
+		warn("[InventoryUI] InventoryChanged event not found - UI won't auto-update on item collection")
 	end
 end
 
--- Initial refresh
-refreshInventory()
+-- Initial setup
+setupInventoryListener()
 
--- Listen for inventory changes from server
-local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
-if inventoryChangedEvent then
-	inventoryChangedEvent.OnClientEvent:Connect(function()
+-- Handle character respawn - reinitialize everything
+player.CharacterAdded:Connect(function(newCharacter)	
+	task.spawn(function()
+		-- Wait LONGER for server to reload inventory from DataStore and sync backpack
+		-- This matches the server-side delays (humanoid wait + 0.3s + sync delays)
+		task.wait(2)
+				
+		-- Refresh inventory display
 		refreshInventory()
+		
+		-- Re-setup inventory listener
+		setupInventoryListener()
+		
 	end)
-else
-	warn("[InventoryUI] InventoryChanged event not found - UI won't auto-update on item collection")
-end
+end)
