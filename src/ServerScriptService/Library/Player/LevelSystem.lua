@@ -4,8 +4,10 @@
 
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+local SFXEvent = ReplicatedStorage:FindFirstChild("SFXEvent")
 
 -- Function to save level and experience to datastore (throttled)
 local function saveLevelToDataStore(player, level, experience, neededExperience, reason)
@@ -38,7 +40,7 @@ local function checkLevelUp(player)
 		if statPoints then
 			statPoints.Value = statPoints.Value + 3
 		end
-		
+		SFXEvent:FireClient(player, "LevelUp")
 		leveledUp = true
 	end
 	

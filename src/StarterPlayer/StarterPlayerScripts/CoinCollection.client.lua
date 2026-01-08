@@ -4,6 +4,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local SoundModule = require(ReplicatedStorage.Modules.SoundModule)
+local SFXEvent = ReplicatedStorage:FindFirstChild("SFXEvent")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -27,79 +29,15 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if collectDebounce then return end
 		collectDebounce = true
 		task.delay(COLLECT_COOLDOWN, function() collectDebounce = false end)
-		
-		local character = player.Character
-		if not character or not character:FindFirstChild("HumanoidRootPart") then
-			return
-		end
-		
-		local playerRoot = character.HumanoidRootPart
-		
-		-- Find the closest collectible item (coins or drops)
-		local closestItem = nil
-		local closestDistance = COLLECT_DISTANCE
-		
-		for _, item in ipairs(workspace:GetChildren()) do
-			-- Check for coins or item drops
-			if item:FindFirstChild("CoinType") or item:FindFirstChild("ItemType") then
-				-- Use GetPivot() which works on both parts and models
-				local itemPivot = item:GetPivot()
-				if itemPivot then
-					local distance = (itemPivot.Position - playerRoot.Position).Magnitude
-					if distance <= closestDistance then
-						closestDistance = distance
-						closestItem = item
-					end
-				end
-			end
-		end
-		
-		-- Collect the closest item
-		if closestItem then
-			local remote = getCollectRemote()
-			if remote then
-				remote:FireServer(closestItem)
-			end
+		-- Just notify server to collect nearest item
+		local remote = getCollectRemote()
+		if remote then
+			remote:FireServer()
 		end
 	end
 end)
 
--- Function to collect nearest item
-local function collectNearestItem()
-	local character = player.Character
-	if not character or not character:FindFirstChild("HumanoidRootPart") then
-		return
-	end
-	
-	local playerRoot = character.HumanoidRootPart
-	
-	-- Find the closest collectible item (coins or drops)
-	local closestItem = nil
-	local closestDistance = COLLECT_DISTANCE
-	
-	for _, item in ipairs(workspace:GetChildren()) do
-		-- Check for coins or item drops
-		if item:FindFirstChild("CoinType") or item:FindFirstChild("ItemType") then
-			-- Use GetPivot() which works on both parts and models
-			local itemPivot = item:GetPivot()
-			if itemPivot then
-				local distance = (itemPivot.Position - playerRoot.Position).Magnitude
-				if distance <= closestDistance then
-					closestDistance = distance
-					closestItem = item
-				end
-			end
-		end
-	end
-	
-	-- Collect the closest item
-	if closestItem then
-		local remote = getCollectRemote()
-		if remote then
-			remote:FireServer(closestItem)
-		end
-	end
-end
+
 
 -- Setup pickup button for mobile
 local function setupPickupButton()
@@ -122,8 +60,11 @@ local function setupPickupButton()
 		if collectDebounce then return end
 		collectDebounce = true
 		task.delay(COLLECT_COOLDOWN, function() collectDebounce = false end)
-		
-		collectNearestItem()
+		-- Just notify server to collect nearest item
+		local remote = getCollectRemote()
+		if remote then
+			remote:FireServer()
+		end
 	end)
 end
 
@@ -135,4 +76,3 @@ setupPickupButton()
 player.CharacterAdded:Connect(function(newCharacter)
 	character = newCharacter
 end)
-

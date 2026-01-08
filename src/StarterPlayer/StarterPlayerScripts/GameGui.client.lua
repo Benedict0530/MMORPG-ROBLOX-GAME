@@ -177,11 +177,10 @@ local function updateStatsInfoDisplay()
 	if dexterityText and dexterityStat then dexterityText.Text = "Dexterity:" end
 	if dexterityValue and dexterityStat then dexterityValue.Text = tostring(dexterityStat.Value) end
 	
-	-- Damage range: min (attack + weapon) to max (attack * 1.5 for critical + weapon) - combined label and value
+	-- Damage range: min (base * 0.4) to max (base * 2 * 1.6 = base * 3.2) to match server logic
 	if damageValue and attackStat then
 		local attackDamage = attackStat.Value
 		local weaponDamage = 0
-		
 		-- Check for equipped weapon and get its damage
 		if character then
 			local equippedTool = character:FindFirstChildOfClass("Tool")
@@ -192,9 +191,9 @@ local function updateStatsInfoDisplay()
 				end
 			end
 		end
-		
-		local minDamage = attackDamage + weaponDamage
-		local maxDamage = math.floor((attackDamage + weaponDamage) * 2)
+		local base = attackDamage + weaponDamage
+		local minDamage = math.floor(base * 0.4)
+		local maxDamage = math.floor(base * 3.2)
 		damageValue.Text = "Damage: " .. formatNumberWithCommas(minDamage) .. " - " .. formatNumberWithCommas(maxDamage)
 	end
 	
@@ -623,6 +622,7 @@ local function setupCharacter(newCharacter)
 end
 
 
+
 -- ============ EVENT LISTENERS ============
 -- Initial character setup
 setupCharacter(player.Character or player.CharacterAdded:Wait())
@@ -640,4 +640,12 @@ damageEvent.OnClientEvent:Connect(function(targetPart, damageAmount, isCritical,
 		showDamageText(targetPart, damageAmount, isFromPlayer, isCritical)
 	end
 end)
+
+-- Listen for weapon change event to update damage GUI
+local weaponChangedEvent = ReplicatedStorage:WaitForChild("WeaponChangedEvent")
+if weaponChangedEvent and weaponChangedEvent:IsA("BindableEvent") then
+	weaponChangedEvent.Event:Connect(function()
+		updateStatsInfoDisplay()
+	end)
+end
 

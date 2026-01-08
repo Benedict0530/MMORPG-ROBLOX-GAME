@@ -10,21 +10,24 @@ local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Librar
 -- Drops format: { itemName = "Twig", chance = 0.5 } means 50% chance to drop
 local DEFAULT_ENEMY_STATS = {
     ["Gloop Crusher"] = {
-        Health = 30,
-        Attack = 8,
-        Experience = 100,
+        Health = 15,
+        Attack = 5,
+        Experience = 1,
         Money = 1,
         Drops = {
-            { itemName = "Twig", chance = 0.3 }  -- 30% chance to drop Twig
+            { itemName = "Wooden Sword", chance = 0.1 },  -- 10% chance to drop WoodenSword
+            { itemName = "Twig", chance = 0.3 }
         }
     },
-    ["Slime"] = {
-        Health = 10,
-        Attack = 1,
-        Experience = 2,
-        Money = 2,
+    ["Red Gloop Crusher"] = {
+        Health = 180,
+        Attack = 15,
+        Experience = 5,
+        Money = 5,
         Drops = {
-            { itemName = "SlimeBall", chance = 0.25 }  -- 25% chance to drop SlimeBall
+            { itemName = "Wooden Sword", chance = 0.25 },  -- 25% chance to drop WoodenSword
+            { itemName = "Plastic Sword", chance = 0.02 },        
+            { itemName = "Iron Sword", chance = 0.01 }
         }
     }
     -- Add more enemies here

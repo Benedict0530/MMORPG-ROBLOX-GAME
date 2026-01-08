@@ -33,85 +33,69 @@ end
 -- Track when loading started (to enforce minimum display time)
 local loadingStartTime = tick()
 
--- Function to check if all systems are ready
-local function isGameFullyLoaded()
-	-- Check 1: Player stats folder exists and has required values
-	local stats = player:FindFirstChild("Stats")
-	if not stats then
-		return false, "Stats"
-	end
+-- Function to check if player has equipped weapon
+local function hasEquippedWeapon()
+	local character = player.Character
+	if not character then return false end
 	
-	local requiredStats = {"Money", "Level", "MaxHealth", "CurrentHealth", "MaxMana", "CurrentMana", "Experience", "NeededExperience"}
-	for _, statName in ipairs(requiredStats) do
-		if not stats:FindFirstChild(statName) then
-			return false, "Stats: " .. statName
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") then
+			return true, child
 		end
 	end
 	
-	-- Check 2: Player inventory loaded (via RemoteFunction)
-	local getInventory = ReplicatedStorage:FindFirstChild("GetPlayerInventory")
-	if not getInventory or not getInventory:IsA("RemoteFunction") then
-		return false, "GetPlayerInventory RemoteFunction"
+	return false, nil
+end
+
+-- Function to preload animations by playing them
+local function preloadAnimationsFromWeapon(weapon)
+	local character = player.Character
+	if not character or not weapon then return false end
+	
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid then return false end
+	
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then return false end
+	
+	-- Play each animation child in the weapon
+	local animationsPlayed = 0
+	for _, child in ipairs(weapon:GetChildren()) do
+		if child:IsA("Animation") then
+			pcall(function()
+				local track = animator:LoadAnimation(child)
+				if track then
+					track:Play()
+					task.wait(0.1)  -- Brief play to cache it
+					track:Stop()
+					animationsPlayed = animationsPlayed + 1
+				end
+			end)
+		end
 	end
 	
-	local success, inventoryData = pcall(function()
-		return getInventory:InvokeServer()
-	end)
-	if not success then
-		return false, "Inventory (not responding)"
-	end
+	return animationsPlayed > 0
+end
+
+-- Wait for player to equip weapon and preload animations
+local maxAttempts = 600  -- 5 minutes max
+local attempts = 0
+local checkInterval = 0.5
+local animationsPreloaded = false
+
+while attempts < maxAttempts do
+	local hasWeapon, equippedWeapon = hasEquippedWeapon()
 	
-	-- CRITICAL: Verify inventory actually has data
-	if not inventoryData or type(inventoryData) ~= "table" or #inventoryData == 0 then
-		return false, "Inventory (empty)"
-	end
-	
-	-- Check 3: Player has equipped weapon
-	local hasEquippedWeapon = false
-	for _, tool in ipairs(player:GetChildren()) do
-		if tool:IsA("Tool") then
-			hasEquippedWeapon = true
+	if hasWeapon and not animationsPreloaded then
+		-- Try to preload animations from equipped weapon
+		animationsPreloaded = preloadAnimationsFromWeapon(equippedWeapon)
+		if animationsPreloaded then
 			break
 		end
 	end
 	
-	if not hasEquippedWeapon then
-		return false, "Equipped weapon"
-	end
-	
-	-- All checks passed!
-	return true, "Ready"
-end
-
--- Wait for game to be fully loaded with detailed logging
-local maxAttempts = 600 -- 300 seconds at 0.5s intervals (5 minutes max)
-local attempts = 0
-local checkInterval = 0.5
-local lastStatus = ""
-
-while attempts < maxAttempts do
-	local isReady, status = isGameFullyLoaded()
-	
-	-- Only log when status changes to avoid spam
-	if status ~= lastStatus then
-		if isReady then
-		else
-		end
-		lastStatus = status
-	end
-	
-	if isReady then
-		break
-	end
-	
 	attempts = attempts + 1
 	task.wait(checkInterval)
-end
-
-if attempts >= maxAttempts then
-	warn("[LoadingManager] ⚠ Timeout: Game did not fully load after " .. (maxAttempts * checkInterval) .. " seconds")
-	warn("[LoadingManager] Last status: " .. lastStatus)
-	-- Continue anyway - might just be slow
 end
 
 -- Enforce MINIMUM loading screen display time (at least 2 seconds)

@@ -11,26 +11,7 @@ local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitFo
 -- Load ItemDropManager for handling drops
 local ItemDropManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("ItemDropManager"))
 
--- Initialize collision groups once
-pcall(function() PhysicsService:RegisterCollisionGroup("Env") end)
-pcall(function() PhysicsService:RegisterCollisionGroup("Coins") end)
-pcall(function() PhysicsService:RegisterCollisionGroup("Players") end)
-
--- Setup collision relationships for Coins (like Enemies)
-PhysicsService:CollisionGroupSetCollidable("Coins", "Coins", true)
-pcall(function() PhysicsService:CollisionGroupSetCollidable("Coins", "Enemies", false) end)
-pcall(function() PhysicsService:CollisionGroupSetCollidable("Enemies", "Enemies", false) end)
-pcall(function() PhysicsService:CollisionGroupSetCollidable("Coins", "Players", false) end)
-pcall(function() PhysicsService:CollisionGroupSetCollidable("Coins", "Env", true) end)
-
--- Verify collision setup
-task.wait(0.1)
-local success, canCollide = pcall(function()
-	return PhysicsService:CollisionGroupsAreCollidable("Coins", "Players")
-end)
-if not success then
-	warn("[GloopCrusher] Could not verify Coins-Players collision relationship")
-end
+local SoundModule = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("SoundModule"))
 
 -- Add all Map folder parts to "Env" collision group once at startup
 local function initializeMapCollision()
@@ -107,6 +88,20 @@ end)
 
 function EnemiesManager.Start(model)
 	local slime = model
+	-- DEBUG: Print all children and part info for this enemy model
+	print("[EnemyInit] Initializing enemy:", slime.Name)
+	local function printChildren(obj, indent)
+		indent = indent or ""
+		for _, child in ipairs(obj:GetChildren()) do
+			local info = indent .. "- " .. child.Name .. " (" .. child.ClassName .. ")"
+			if child:IsA("BasePart") then
+				info = info .. string.format(" [CanCollide=%s, Anchored=%s, CollisionGroup=%s]", tostring(child.CanCollide), tostring(child.Anchored), child.CollisionGroup)
+			end
+			print(info)
+			printChildren(child, indent .. "  ")
+		end
+	end
+	printChildren(slime)
 	if not slime then warn("[EnemiesModule] Model not found!"); return end
 	
 	-- Prevent double initialization (might be called from both DescendantAdded and respawn code)
@@ -497,7 +492,6 @@ function EnemiesManager.Start(model)
 			-- IMMEDIATELY set up collision group to prevent dead enemy from hitting players
 			pcall(function() PhysicsService:RegisterCollisionGroup("DeadEnemies") end)
 			PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "DeadEnemies", true)
-			pcall(function() PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "Players", false) end)
 			
 			-- Add all slime parts to DeadEnemies group immediately
 			local function addToDeadEnemiesGroup(obj)
@@ -635,7 +629,7 @@ function EnemiesManager.Start(model)
 			end
 			for _, child in ipairs(obj:GetChildren()) do anchorCoinParts(child) end
 		end
-		anchorCoinParts(coin)
+		-- anchorCoinParts(coin)
 		
 		-- Apply coin collision group (same as enemies)
 		local COIN_GROUP = "Coins"
@@ -699,18 +693,17 @@ function EnemiesManager.Start(model)
 	end
 	
 	-- Wait a bit to ensure items are properly spawned before destroying the enemy
-	task.wait(0.5)
 	
 	-- -- Destroy humanoid and joints
 	-- if slime.Humanoid then
 	-- 	slime.Humanoid:Disconnect()
 	-- end
 	slime:BreakJoints()
-
-	task.wait(2)
+	SoundModule.playSoundInRange("DiedAudio", root.Position, "SFX", 100, false, 1)
+	task.wait(0.5)
 	slime:Destroy()
 	task.wait(15)
-			local template = ServerStorage:FindFirstChild(enemyName)
+			local template = ServerStorage:WaitForChild("Enemies"):FindFirstChild(enemyName)
 			if template then
 				local newSlime = template:Clone()
 				newSlime.Parent = parent
@@ -724,55 +717,54 @@ function EnemiesManager.Start(model)
 		end)
 	end
 	task.spawn(moveTowardsTarget)
+
 end
 
 -- Auto-initialize all enemies in the workspace when module loads
 local Workspace = game:GetService("Workspace")
+local EnemiesFolder = Workspace:FindFirstChild("Enemies")
 
 local function findAndInitializeEnemies(parent)
 	for _, model in ipairs(parent:GetChildren()) do
-		-- Check if this is an enemy model (has Humanoid and HumanoidRootPart)
-		local hasHumanoid = model:FindFirstChild("Humanoid") ~= nil
-		local hasRootPart = model:FindFirstChild("HumanoidRootPart") ~= nil
-		
-		if hasHumanoid and hasRootPart then
-			-- Check if it's not a player character
-			local isPlayer = Players:FindFirstChild(model.Name) and Players:FindFirstChild(model.Name).Character == model
-			if not isPlayer then
-				-- Additional check: make sure Humanoid is actually a Humanoid object (not just something named Humanoid)
-				local humanoid = model:FindFirstChild("Humanoid")
-				if humanoid and humanoid:IsA("Humanoid") then
-					task.spawn(function()
-						-- Verify the model still exists and has proper structure before initializing
-						if model and model.Parent and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
-							EnemiesManager.Start(model)
-						end
-					end)
+		-- Only initialize enemies inside workspace.Enemies
+		if model:IsDescendantOf(EnemiesFolder) or model == EnemiesFolder then
+			local hasHumanoid = model:FindFirstChild("Humanoid") ~= nil
+			local hasRootPart = model:FindFirstChild("HumanoidRootPart") ~= nil
+			if hasHumanoid and hasRootPart then
+				local isPlayer = Players:FindFirstChild(model.Name) and Players:FindFirstChild(model.Name).Character == model
+				if not isPlayer then
+					local humanoid = model:FindFirstChild("Humanoid")
+					if humanoid and humanoid:IsA("Humanoid") then
+						task.spawn(function()
+							if model and model.Parent and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
+								EnemiesManager.Start(model)
+							end
+						end)
+					end
 				end
 			end
+			findAndInitializeEnemies(model)
 		end
-		-- Recursively search subfolders
-		findAndInitializeEnemies(model)
 	end
 end
 
-findAndInitializeEnemies(Workspace)
+if EnemiesFolder then
+	findAndInitializeEnemies(EnemiesFolder)
+end
 
 -- Also monitor for new models added to workspace (spawned enemies)
 Workspace.DescendantAdded:Connect(function(model)
+	-- Only initialize if model is inside workspace.Enemies
+	if not EnemiesFolder or not model:IsDescendantOf(EnemiesFolder) then return end
 	local hasHumanoid = model:FindFirstChild("Humanoid") ~= nil
 	local hasRootPart = model:FindFirstChild("HumanoidRootPart") ~= nil
-	
 	if hasHumanoid and hasRootPart then
-		-- Check if it's not a player character
 		local isPlayer = Players:FindFirstChild(model.Name) and Players:FindFirstChild(model.Name).Character == model
 		if not isPlayer then
-			-- Additional check: make sure Humanoid is actually a Humanoid object
 			local humanoid = model:FindFirstChild("Humanoid")
 			if humanoid and humanoid:IsA("Humanoid") then
-				task.wait(0.1) -- Wait for model to fully load
+				task.wait(0.1)
 				task.spawn(function()
-					-- Verify the model still exists before initializing
 					if model and model.Parent and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
 						EnemiesManager.Start(model)
 					end

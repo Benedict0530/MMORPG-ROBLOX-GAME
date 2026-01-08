@@ -53,10 +53,16 @@ end
 -- Setup button animations
 local function setupButtonAnimations()
 	local gameGui = playerGui:FindFirstChild("GameGui")
-	if not gameGui then return end
+	if not gameGui then 
+		warn("[ButtonAnimations] GameGui not found")
+		return 
+	end
 	
 	local frame = gameGui:FindFirstChild("Frame")
-	if not frame then return end
+	if not frame then 
+		warn("[ButtonAnimations] Frame not found in GameGui")
+		return 
+	end
 	
 	-- Setup attack button animation
 	local attackButton = frame:FindFirstChild("AttackButton")
@@ -73,6 +79,8 @@ local function setupButtonAnimations()
 		attackButton.MouseLeave:Connect(function()
 			animateButtonRelease(attackButton)
 		end)
+	else
+		warn("[ButtonAnimations] AttackButton not found")
 	end
 	
 	-- Setup pickup button animation
@@ -90,56 +98,38 @@ local function setupButtonAnimations()
 		pickupButton.MouseLeave:Connect(function()
 			animateButtonRelease(pickupButton)
 		end)
+	else
+		warn("[ButtonAnimations] PickupButton not found")
+	end
+
+	-- Setup run button animation
+	local runButton = frame:FindFirstChild("RunButton")
+	if runButton then
+		runButton.MouseButton1Down:Connect(function()
+			animateButtonPress(runButton)
+		end)
+		
+		runButton.MouseButton1Up:Connect(function()
+			animateButtonRelease(runButton)
+		end)
+		
+		-- Also handle when mouse leaves while pressed
+		runButton.MouseLeave:Connect(function()
+			animateButtonRelease(runButton)
+		end)
+	else
+		warn("[ButtonAnimations] RunButton not found")
 	end
 end
 
 -- Setup animations after GUI is loaded
 task.wait(0.5)
-setupButtonAnimations()
 
--- Setup button animations
-local function setupButtonAnimations()
-	local gameGui = playerGui:FindFirstChild("GameGui")
-	if not gameGui then return end
-	
-	local frame = gameGui:FindFirstChild("Frame")
-	if not frame then return end
-	
-	-- Setup attack button animation
-	local attackButton = frame:FindFirstChild("AttackButton")
-	if attackButton then
-		attackButton.MouseButton1Down:Connect(function()
-			animateButtonPress(attackButton)
-		end)
-		
-		attackButton.MouseButton1Up:Connect(function()
-			animateButtonRelease(attackButton)
-		end)
-		
-		-- Also handle when mouse leaves while pressed
-		attackButton.MouseLeave:Connect(function()
-			animateButtonRelease(attackButton)
-		end)
-	end
-	
-	-- Setup pickup button animation
-	local pickupButton = frame:FindFirstChild("PickupButton")
-	if pickupButton then
-		pickupButton.MouseButton1Down:Connect(function()
-			animateButtonPress(pickupButton)
-		end)
-		
-		pickupButton.MouseButton1Up:Connect(function()
-			animateButtonRelease(pickupButton)
-		end)
-		
-		-- Also handle when mouse leaves while pressed
-		pickupButton.MouseLeave:Connect(function()
-			animateButtonRelease(pickupButton)
-		end)
-	end
+-- Wait for GameGui to exist
+local gameGui = playerGui:WaitForChild("GameGui", 10)
+if not gameGui then
+	warn("[ButtonAnimations] GameGui not found after waiting 10 seconds")
+	return
 end
 
--- Setup animations after GUI is loaded
-task.wait(0.5)
 setupButtonAnimations()

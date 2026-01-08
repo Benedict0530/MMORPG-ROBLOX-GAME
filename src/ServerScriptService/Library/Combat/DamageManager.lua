@@ -72,13 +72,50 @@ function DamageManager.calculateDamage(player, weaponName, randomFactor)
 	-- Randomize damage between 40% to 100% of calculated damage
 	-- If randomFactor not provided, generate random between 0.4 and 1.0
 	if not randomFactor then
-		randomFactor = 0.4 + (math.random() * 0.6) -- Random between 0.4 and 1.0
+		randomFactor = 0.4 + (math.random() * 1.2) -- Random between 0.4 and 1.0
 	end
 	
 	local finalDamage = math.floor(calculatedDamage * randomFactor)
 	finalDamage = math.max(finalDamage, 1) -- Ensure minimum damage of 1
 	
 	return finalDamage, critical, baseDamage, dexterity
+end
+
+-- Track players still initializing after spawn
+local initializingPlayers = {}
+local disconnectedPlayers = {} -- Track disconnected players
+
+-- Mark a player as initializing (call when character spawns)
+function DamageManager.MarkPlayerInitializing(player)
+	initializingPlayers[player.UserId] = true
+	print("[DamageManager] Player " .. player.Name .. " marked as initializing")
+end
+
+-- Mark a player as fully loaded (call when equipment is equipped)
+function DamageManager.MarkPlayerLoaded(player)
+	initializingPlayers[player.UserId] = nil
+	print("[DamageManager] Player " .. player.Name .. " marked as fully loaded")
+end
+
+-- Mark a player as disconnected (call when player leaves)
+function DamageManager.MarkPlayerDisconnected(player)
+	disconnectedPlayers[player.UserId] = true
+	print("[DamageManager] Player " .. player.Name .. " marked as disconnected - cannot receive damage")
+end
+
+-- Check if player is still initializing
+local function isPlayerInitializing(player)
+	return initializingPlayers[player.UserId] == true
+end
+
+-- Check if player is disconnected
+local function isPlayerDisconnected(player)
+	return disconnectedPlayers[player.UserId] == true
+end
+
+-- Public function to check if player is initializing (for use in other modules)
+function DamageManager.IsPlayerInitializing(player)
+	return isPlayerInitializing(player)
 end
 
 -- Get damage range for UI display (min damage to max damage with critical)
@@ -109,12 +146,10 @@ end
 
 ------- INCOMING DAMAGE (Defense-based reduction with Armor) -------
 
--- Defensive Output = √(Player Defence × Player Armor Defence)
--- This creates a meaningful benefit from stacking both Defence and Armor
+-- Defensive Output = sqrt(Defence) + sqrt(Armor Defence) (diminishing returns)
 -- Damage taken = Enemy damage roll - Defensive Output (minimum 1)
 local function calculateDefensiveOutput(defense, armorDefense)
-	-- Square root of (Defence × Armor Defence)
-	local defensiveOutput = math.sqrt(defense * armorDefense)
+	local defensiveOutput = math.sqrt(defense * armorDefense) /1.5
 	return defensiveOutput
 end
 
@@ -127,38 +162,36 @@ function DamageManager.CalculateIncomingDamage(baseDamage, player, randomFactor)
 	if not player or not baseDamage or baseDamage <= 0 then
 		return 0
 	end
-	
+
 	local stats = player:FindFirstChild("Stats")
 	if not stats then
 		-- No stats folder, return base damage (shouldn't happen but safe default)
 		return baseDamage
 	end
-	
+
 	-- Get Defence and Armor Defence stats
 	local defenseValue = stats:FindFirstChild("Defence")
 	local defence = defenseValue and defenseValue.Value or 0
-	
+
 	-- Armor Defence defaults to Defence value if not present (same defensive power)
-	-- Players can allocate extra to ArmorDefence for more defense
 	local armorDefenseValue = stats:FindFirstChild("ArmorDefence")
 	local armorDefense = (armorDefenseValue and armorDefenseValue.Value > 0) and armorDefenseValue.Value or defence
-	
-	-- Calculate defensive output
+
+	-- Calculate defensive output (diminishing returns)
 	local defensiveOutput = calculateDefensiveOutput(defence, armorDefense)
-	
+
 	-- Randomize enemy damage between 40% to 100% of base damage
-	-- If randomFactor not provided, generate random between 0.4 and 1.0
 	if not randomFactor then
 		randomFactor = 0.4 + (math.random() * 0.6) -- Random between 0.4 and 1.0
 	end
-	
+
 	local enemyDamage = baseDamage * randomFactor
-	
+
 	-- Apply defensive reduction: Damage - DefensiveOutput
 	local reducedDamage = enemyDamage - defensiveOutput
-	
-	-- Damage can go to 0 if defence is high enough
-	return math.max(0, math.floor(reducedDamage))
+
+	-- Always allow minimum 1 damage taken
+	return math.max(1, math.floor(reducedDamage))
 end
 
 -- Get defense bonus information (for debugging or UI display)
@@ -187,8 +220,60 @@ end
 function DamageManager.DamagePlayer(baseDamage, player, randomFactor)
 	if not player then return 0 end
 	
+	-- Check if player is disconnected - skip damage
+	if isPlayerDisconnected(player) then
+		print("[DamageManager] Blocked damage to " .. player.Name .. " - player disconnected")
+		return 0
+	end
+	
+	-- Check if player is still initializing - skip damage during spawn
+	if isPlayerInitializing(player) then
+		print("[DamageManager] Blocked damage to " .. player.Name .. " - player still initializing")
+		return 0
+	end
+	
 	local stats = player:FindFirstChild("Stats")
 	if not stats then return 0 end
+	
+	-- Check if player has equipped weapon
+	local equippedFolder = stats:FindFirstChild("Equipped")
+	if not equippedFolder or not equippedFolder:IsA("Folder") then
+		print("[DamageManager] Blocked damage to " .. player.Name .. " - no Equipped folder")
+		return 0
+	end
+	
+	local equippedId = equippedFolder:FindFirstChild("id")
+	if not equippedId or equippedId.Value == "" then
+		print("[DamageManager] Blocked damage to " .. player.Name .. " - no equipped weapon ID")
+		return 0
+	end
+	
+	-- Check if player has a character with humanoid
+	if not player.Character or not player.Character:FindFirstChild("Humanoid") then
+		print("[DamageManager] Blocked damage to " .. player.Name .. " - no character or humanoid")
+		return 0
+	end
+	
+	-- Check if player actually has the weapon in their hand (equipped tool in character)
+	local equippedWeaponName = equippedFolder:FindFirstChild("name")
+	if not equippedWeaponName then
+		print("[DamageManager] Blocked damage to " .. player.Name .. " - no weapon name value")
+		return 0
+	end
+	
+	local baseWeaponName = equippedWeaponName.Value:match("^([^_]+)") or equippedWeaponName.Value
+	local hasEquippedTool = false
+	for _, tool in ipairs(player.Character:GetChildren()) do
+		if tool:IsA("Tool") and tool.Name == baseWeaponName then
+			hasEquippedTool = true
+			break
+		end
+	end
+	
+	if not hasEquippedTool then
+		print("[DamageManager] Blocked damage to " .. player.Name .. " - weapon not in character hand")
+		return 0
+	end
 	
 	local currentHealth = stats:FindFirstChild("CurrentHealth")
 	if not currentHealth then return 0 end

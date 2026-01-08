@@ -66,45 +66,63 @@ local DEFAULT_STATS = {
 	Experience = 0,
 	NeededExperience = 10,
 	StatPoints = 3,
-	Equipped = { name = "", id = "" },
-	ResetPoints = 1
+	Equipped = nil, -- Will be set per-player using InventoryManager.CreateStarterWeaponAndEquipped
+	ResetPoints = 1,
+	PlayerMap = "Grimleaf Entrance",
+	LastSpawnName = "SpawnLocation", -- Track last used spawn part
+	InventoryCapacity = 0, -- Current item count (updated dynamically based on actual inventory)
+	InventoryMaxCapacity = 10 -- Max items allowed (can be increased by gamepass later)
 }
 
 local function setupStatsFolder(player, data)
 	local statsFolder = Instance.new("Folder")
 	statsFolder.Name = "Stats"
 	statsFolder.Parent = player
+
+	-- If equipped is blank, try to set it to the first item in inventory (if available)
+	if data.Equipped and (data.Equipped.name == "" or data.Equipped.id == "") then
+		-- Try to get inventory from InventoryManager
+		local success, InventoryManager = pcall(function()
+			return require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
+		end)
+		if success and InventoryManager then
+			local inventory = InventoryManager.GetInventory(player)
+			if inventory and #inventory > 0 then
+				data.Equipped = { name = inventory[1].name, id = inventory[1].id }
+			end
+		end
+	end
+
 	for statName, value in pairs(data) do
 		local statValue
-		-- Create folder for Equipped with name/id children, IntValue for everything else
 		if statName == "Equipped" then
 			statValue = Instance.new("Folder")
 			statValue.Name = statName
 			statValue.Parent = statsFolder
-			
-			-- Create name and id children
 			if type(value) == "table" then
 				local nameValue = Instance.new("StringValue")
 				nameValue.Name = "name"
 				nameValue.Value = value.name or ""
 				nameValue.Parent = statValue
-				
 				local idValue = Instance.new("StringValue")
 				idValue.Name = "id"
 				idValue.Value = value.id or ""
 				idValue.Parent = statValue
 			else
-				-- Fallback for old string format
 				local nameValue = Instance.new("StringValue")
 				nameValue.Name = "name"
 				nameValue.Value = tostring(value)
 				nameValue.Parent = statValue
-				
 				local idValue = Instance.new("StringValue")
 				idValue.Name = "id"
 				idValue.Value = ""
 				idValue.Parent = statValue
 			end
+		elseif statName == "PlayerMap" or statName == "LastSpawnName" then
+			statValue = Instance.new("StringValue")
+			statValue.Name = statName
+			statValue.Value = tostring(value)
+			statValue.Parent = statsFolder
 		else
 			statValue = Instance.new("IntValue")
 			statValue.Name = statName
@@ -162,13 +180,22 @@ Players.PlayerAdded:Connect(function(player)
 	end)
 	if not success or not data then
 		-- No data exists, create default entry
+		local InventoryManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
+		local inventory, equipped = InventoryManager.CreateStarterWeaponAndEquipped()
+		-- Instead of generating a new equipped id, use the id of the starter item in inventory
+		local starterEquipped = { name = inventory[1].name, id = inventory[1].id }
+		local newStats = table.clone(DEFAULT_STATS)
+		newStats.Equipped = starterEquipped
 		local createSuccess, createErr = pcall(function()
-			statsStore:SetAsync(key, table.clone(DEFAULT_STATS))
+			statsStore:SetAsync(key, newStats)
 		end)
 		if not createSuccess then
 			warn("[PlayerDataStore] Failed to create data for player " .. player.Name .. " (" .. player.UserId .. "): " .. tostring(createErr))
 		end
-		data = table.clone(DEFAULT_STATS)
+		data = newStats
+		-- Also immediately save starter inventory for this player
+		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+		UnifiedDataStoreManager.SaveInventory(player.UserId, inventory, true)
 	else
 		-- Data loaded from DataStore
 		-- If CurrentHealth is nil or <= 0, reset to MaxHealth
@@ -189,7 +216,7 @@ Players.PlayerAdded:Connect(function(player)
 	end
 	-- Setup stats folder with loaded data
 	setupStatsFolder(player, data)
-	
+    
 	-- Signal that Stats folder is ready for this player
 	local signal = getStatsReadySignal(player.UserId)
 	playersStatsReady[player.UserId] = true
@@ -202,7 +229,7 @@ Players.PlayerAdded:Connect(function(player)
 	end
 	fired.Value = true
 	signal:Fire(player)
-	
+    
 	-- Add player character to collision group to prevent player-to-player collision
 	if player.Character then
 		task.spawn(function()
@@ -220,29 +247,75 @@ Players.PlayerAdded:Connect(function(player)
 			else
 				warn("[PlayerDataStore] Failed to add " .. player.Name .. " to collision group: " .. tostring(err))
 			end
+			
+			-- Monitor for new parts added (like accessories) and add them to Players collision group
+			player.Character.DescendantAdded:Connect(function(descendant)
+				if descendant:IsA("BasePart") then
+					pcall(function()
+						descendant.CollisionGroup = "Players"
+					end)
+				end
+			end)
 		end)
 	end
-	
+    
 	-- Setup CharacterAdded to add future characters to collision group and reset health/mana
-	player.CharacterAdded:Connect(function(character)
+
+	local function handleCharacterSpawn(character)
 		task.spawn(function()
-			task.wait(0.1) -- Short wait for character to spawn
+			-- Mark player as initializing on respawn
+			local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
+			DamageManager.MarkPlayerInitializing(player)
 			
-			-- Find spawn location and position character at correct Z level
-			local spawnLocation = workspace:FindFirstChild("SpawnLocation")
+			task.wait(0.1) -- Short wait for character to spawn
+
+			-- Find spawn location based on PlayerMap and LastSpawnName stat
+			local stats = player:FindFirstChild("Stats")
+			local mapName, spawnName
+			if stats then
+				local playerMapValue = stats:FindFirstChild("PlayerMap")
+				if playerMapValue and playerMapValue.Value ~= "" then
+					mapName = playerMapValue.Value
+				end
+				local lastSpawnValue = stats:FindFirstChild("LastSpawnName")
+				if lastSpawnValue and lastSpawnValue.Value ~= "" then
+					spawnName = lastSpawnValue.Value
+				end
+			end
+			-- Fallbacks only if both are missing
+			if not mapName then mapName = "Grimleaf Entrance" end
+			if not spawnName then spawnName = "SpawnLocation" end
+			print("[PlayerDataStore] Respawn: PlayerMap=", mapName, ", LastSpawnName=", spawnName)
+			local mapFolder = workspace:FindFirstChild("Maps")
+			local spawnLocation = nil
+			if mapFolder then
+				local map = mapFolder:FindFirstChild(mapName)
+				if map then
+					spawnLocation = map:FindFirstChild(spawnName)
+				end
+			end
+			if player:GetAttribute("IsPortalTeleporting") then
+				print("[PlayerDataStore] Skipping respawn teleport due to portal teleport.")
+				return
+			end
 			if spawnLocation and spawnLocation:IsA("BasePart") then
 				local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
 				if humanoidRootPart then
-					-- Get spawn position - keep character's XY but use spawn location's Z
-					local spawnPos = spawnLocation.Position
-					local charPos = humanoidRootPart.Position
+					print("[PlayerDataStore] Actually respawning to part:", spawnLocation.Name, "in map:", mapName, "at position", tostring(spawnLocation.Position))
+					-- If respawning at default SpawnLocation, reset portal state to allow portal use
+					if spawnLocation.Name == "SpawnLocation" then
+						local PortalHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("PortalHandler"))
+						PortalHandler.ResetPlayerPortalState(player.UserId)
+						-- Do NOT reset LastSpawnName here; keep it as the last portal used
+					end
 					-- Position at spawn location, slightly above the part
+					local spawnPos = spawnLocation.Position
 					humanoidRootPart.CFrame = CFrame.new(spawnPos.X, spawnPos.Y, spawnPos.Z + 5)
 				end
 			end
-			
+
 			task.wait(0.5) -- Wait for character parts to fully load
-			
+
 			-- Reset CurrentHealth and CurrentMana to full when respawning
 			local stats = player:FindFirstChild("Stats")
 			if stats then
@@ -250,18 +323,18 @@ Players.PlayerAdded:Connect(function(player)
 				local currentHealth = stats:FindFirstChild("CurrentHealth")
 				local maxMana = stats:FindFirstChild("MaxMana")
 				local currentMana = stats:FindFirstChild("CurrentMana")
-				
+
 				if maxHealth and currentHealth then
 					currentHealth.Value = maxHealth.Value
 				end
 				if maxMana and currentMana then
 					currentMana.Value = maxMana.Value
 				end
-				
+
 				-- Save the reset health/mana to DataStore
 				UnifiedDataStoreManager.SaveStats(player, true)
 			end
-			
+
 			-- Add all parts of the character to the Players collision group
 			local success, err = pcall(function()
 				for _, part in ipairs(character:GetDescendants()) do
@@ -275,11 +348,36 @@ Players.PlayerAdded:Connect(function(player)
 			else
 				warn("[PlayerDataStore] Failed to add respawn character to collision group: " .. tostring(err))
 			end
+			
+			-- Monitor for new parts added (like accessories) and add them to Players collision group
+			character.DescendantAdded:Connect(function(descendant)
+				if descendant:IsA("BasePart") then
+					pcall(function()
+						descendant.CollisionGroup = "Players"
+					end)
+				end
+			end)
+
+			-- Mark player as loaded after setup
+			DamageManager.MarkPlayerLoaded(player)
 		end)
-	end)
+	end
+
+	-- Handle initial character if it exists (NEW PLAYERS ON FIRST JOIN)
+	if player.Character then
+		print("[PlayerDataStore] Initial character exists for", player.Name, "- teleporting to spawn location")
+		handleCharacterSpawn(player.Character)
+	end
+
+	-- Handle future respawns
+	player.CharacterAdded:Connect(handleCharacterSpawn)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
+	-- Mark player as disconnected so their character can't receive damage
+	local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
+	DamageManager.MarkPlayerDisconnected(player)
+	
 	UnifiedDataStoreManager.SaveStats(player, true)
 end)
 

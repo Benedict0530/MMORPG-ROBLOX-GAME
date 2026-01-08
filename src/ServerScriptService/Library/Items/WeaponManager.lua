@@ -9,6 +9,8 @@ local WeaponData = require(ReplicatedStorage.Modules.WeaponData)
 local WeaponDataStore = require(script.Parent:WaitForChild("WeaponDataStore"))
 local EnemyStatsDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("EnemyStatsDataStore"))
 local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
+local SoundModule = require(ReplicatedStorage.Modules.SoundModule)
+local PVPHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PVPHandler"))
 
 -- Create RemoteEvent for showing enemy damage text on clients
 local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
@@ -20,6 +22,12 @@ end
 
 local lastAttackTimes = {} -- keys are player instances
 local WeaponManager = {}
+
+-- Per-player flag to block swing events during equip
+local blockSwingEvent = {}
+
+-- Expose for InventoryManager to use
+WeaponManager.blockSwingEvent = blockSwingEvent
 
 -- Helper: Get or create Health IntValue for enemy
 local function getOrCreateEnemyHealth(enemyModel, enemyStats)
@@ -34,12 +42,13 @@ local function getOrCreateEnemyHealth(enemyModel, enemyStats)
 end
 
 -- Modular attack logic for each weapon
-function WeaponManager.PerformAttack(player, tool)
+function WeaponManager.PerformAttack(player, tool, weaponSpeed)
+	print("[WeaponManager] PerformAttack called for player=" .. tostring(player) .. ", tool=" .. tostring(tool) .. ", weaponSpeed=" .. tostring(weaponSpeed))
 	if not player or not tool or not tool.Name then 
 		warn("[WeaponManager] PerformAttack called with invalid args: player=" .. tostring(player) .. ", tool=" .. tostring(tool))
 		return 
 	end
-	
+    
 	local character = player.Character
 	if not character then
 		warn("[WeaponManager] Player " .. player.Name .. " has no character.")
@@ -59,9 +68,12 @@ function WeaponManager.PerformAttack(player, tool)
 	local weaponName = tool.Name
 	local weaponStats = WeaponData.GetWeaponStats(weaponName)
 	local speed = weaponStats and weaponStats.speed or 1
+	-- Enforce server-side minimum interval between attacks based on weapon speed (animation duration)
+	local minInterval = 0.4
 	local now = tick()
 	local lastAttack = lastAttackTimes[player] or 0
-	if (now - lastAttack) < (speed) then
+	if (now - lastAttack) < minInterval then
+		print("[WeaponManager] Attack skipped for " .. player.Name .. " due to cooldown. Time since last: " .. tostring(now - lastAttack))
 		return
 	end
 	lastAttackTimes[player] = now
@@ -72,55 +84,76 @@ function WeaponManager.PerformAttack(player, tool)
 		return
 	end
 
-	local hitEnemies = {}
+	print("[WeaponManager] Attack proceeding for " .. player.Name .. " with tool " .. tool.Name)
+
+	local hitEnemies = {} -- Track which enemies have been hit this attack
 	local deadEnemies = {} -- Track dead enemies to prevent further damage
+
+	-- PVP proximity check (once per attack)
+	local charRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if charRoot then
+		-- Sphere-based check from the player's root part
+		PVPHandler.RaycastPlayerHit(player, weaponName, hitEnemies, 5)
+		
+		-- Play attack sound to players within range
+		SoundModule.playSoundInRange("AttackAudio", charRoot.Position, "SFX", 100, false)
+	end
+
+	-- Only allow one hit per enemy per trigger (Touched for NPCs only)
 	local function onTouched(hit)
-		-- Ignore if hit is a player character
-		local hitParent = hit.Parent
-		if hitParent and Players:GetPlayerFromCharacter(hitParent) then
-			return
-		end
+		-- ===== ENEMY DAMAGE =====
 		local enemyModel = hit:FindFirstAncestorOfClass("Model")
-		-- Only process if NOT a player character
-		if enemyModel and enemyModel:FindFirstChild("Humanoid") and not hitEnemies[enemyModel] then
+		if enemyModel and enemyModel:FindFirstChild("Humanoid") then
 			if Players:GetPlayerFromCharacter(enemyModel) then
 				return -- skip player models
 			end
-			-- Don't process if enemy is already dead
-			if deadEnemies[enemyModel] then
-				return
+			if deadEnemies[enemyModel] or hitEnemies[enemyModel] then return end
+
+			local charRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+			local enemyRoot = enemyModel:FindFirstChild("HumanoidRootPart") or enemyModel.PrimaryPart
+            
+			if charRoot and enemyRoot then
+				local toEnemy = (enemyRoot.Position - charRoot.Position).Unit
+				local forward = charRoot.CFrame.LookVector.Unit
+				local dot = forward:Dot(toEnemy)
+				local angle = math.acos(dot)
+				if angle > math.rad(45) then return end
 			end
+
 			hitEnemies[enemyModel] = true
+
+			-- Load enemy stats and apply damage
 			local enemyName = enemyModel.Name
 			local enemyStats = EnemyStatsDataStore.loadEnemyStats(enemyName)
 			local enemyHealth = getOrCreateEnemyHealth(enemyModel, enemyStats)
+            
 			if not enemyHealth:IsA("IntValue") then
 				warn("[WeaponManager] Enemy Health is not IntValue for model " .. enemyName)
 				return
 			end
-			
-			-- Calculate damage using DamageManager (attack + weapon + critical)
-			local damage, isCritical, baseDamage, dexterity = DamageManager.calculateDamage(player, weaponName)
-			
+
+			local damage, isCritical = DamageManager.calculateDamage(player, weaponName)
 			local oldHealth = enemyHealth.Value
 			enemyHealth.Value = math.max(oldHealth - damage, 0)
-			
-			-- Show damage text on all clients with critical indicator (true = player damage, white)
+            
+			SoundModule.playSoundInRange("Hit", enemyRoot.Position, "SFX", 100, false, 1)
 			damageEvent:FireAllClients(enemyModel, damage, isCritical, true)
-			
-			local critText = isCritical and " [CRITICAL]" or ""
-			
+			print("[WeaponManager] " .. player.Name .. " hit enemy '" .. enemyName .. "' for " .. tostring(damage) .. " damage (crit: " .. tostring(isCritical) .. ") | Enemy health: " .. tostring(enemyHealth.Value) .. "/" .. tostring(oldHealth))
+
+			-- Handle enemy death
 			if enemyHealth.Value <= 0 then
 				local humanoid = enemyModel:FindFirstChild("Humanoid")
 				if humanoid then humanoid.Health = 0 end
-				-- Mark enemy as dead to prevent further damage
 				deadEnemies[enemyModel] = true
+				print("[WeaponManager] Enemy '" .. enemyName .. "' killed by " .. player.Name)
 			end
 		end
 	end
 
 	local touchedConn = hitPart.Touched:Connect(onTouched)
-	task.delay(0.3, function()
+	-- Only allow hit registration for a very short window (matches animation hit frame)
+	local HIT_WINDOW = 0.1 -- seconds, should match the animation marker timing
+	task.delay(HIT_WINDOW, function()
 		if touchedConn then touchedConn:Disconnect() end
 	end)
 end
@@ -147,85 +180,101 @@ end
 
 -- Connect weapon/tool usage to effects and logic
 function WeaponManager.ConnectTool(tool, player)
+	print("[WeaponManager] ConnectTool called for tool '" .. tostring(tool and tool.Name) .. "' and player '" .. tostring(player and player.Name) .. "'")
 	if not tool or not tool.Name then 
 		warn("[WeaponManager] Cannot connect tool: tool is nil or has no name")
 		return 
 	end
-	
 	if not player then
 		warn("[WeaponManager] Cannot connect tool: player is nil")
 		return
 	end
-	
+
 	-- Get or create unique ID for this tool instance
 	local itemId = tool:GetAttribute("_ItemId") or ""
 	local uniqueToolId = player.UserId .. "_" .. itemId
-	
-	-- If no item ID, fall back to player ID + tool name + timestamp
 	if itemId == "" then
 		uniqueToolId = player.UserId .. "_" .. tool.Name .. "_" .. tostring(tool)
 	end
-	
-	-- Check if already connected (avoid duplicate listeners)
+
+	-- Always cleanup any previous connection for this tool
 	if toolConnections[uniqueToolId] then
-		print("[WeaponManager] Tool with ID '" .. uniqueToolId .. "' already connected, skipping")
-		return
+		toolConnections[uniqueToolId]:Disconnect()
+		toolConnections[uniqueToolId] = nil
+		print("[WeaponManager] Cleaned up previous connection for tool ID '" .. uniqueToolId .. "'")
 	end
-	
-	
-	-- Wait for SwingEvent to exist (with timeout)
+
+	-- Remove from playerToolIds if present (avoid duplicates)
+	playerToolIds[player.UserId] = playerToolIds[player.UserId] or {}
+	for i = #playerToolIds[player.UserId], 1, -1 do
+		if playerToolIds[player.UserId][i] == uniqueToolId then
+			table.remove(playerToolIds[player.UserId], i)
+		end
+	end
+
+	-- Robustly wait for SwingEvent (up to 2 seconds)
+	print("[WeaponManager] Waiting for SwingEvent on tool '" .. tool.Name .. "' for player '" .. player.Name .. "'")
 	local swingEvent = tool:FindFirstChild("SwingEvent")
-	if not swingEvent then
-		swingEvent = tool:WaitForChild("SwingEvent", 5)
+	local maxWait = 2
+	local waited = 0
+	local retryDelay = 0.05
+	while not swingEvent and waited < maxWait do
+		waited = waited + retryDelay
+		task.wait(retryDelay)
+		swingEvent = tool:FindFirstChild("SwingEvent")
 	end
-	
 	if not swingEvent then
-		warn("[WeaponManager] Tool '" .. tool.Name .. "' does not have a SwingEvent after waiting")
+		warn("[WeaponManager] Tool '" .. tool.Name .. "' does not have a SwingEvent after waiting " .. tostring(maxWait) .. " seconds")
 		return
 	end
-	
+	print("[WeaponManager] Found SwingEvent for tool '" .. tool.Name .. "' for player '" .. player.Name .. "'")
+
 	-- Store player reference with the tool for validation
 	tool:SetAttribute("_OwnerUserId", player.UserId)
-	
+
 	-- Connect the event with closure capturing tool AND player
-	local connection = swingEvent.OnServerEvent:Connect(function(attackingPlayer)
-		-- Verify the attacking player owns this tool
+	local function onSwingEvent(attackingPlayer)
+		print("[WeaponManager] onSwingEvent fired for player '" .. tostring(attackingPlayer and attackingPlayer.Name) .. "' with tool '" .. tostring(tool and tool.Name) .. "'")
+		if blockSwingEvent[attackingPlayer] then
+			warn("[WeaponManager] Ignoring swing event for " .. attackingPlayer.Name .. " while equipping")
+			return
+		end
 		local ownerUserId = tool:GetAttribute("_OwnerUserId")
 		if ownerUserId and ownerUserId ~= attackingPlayer.UserId then
 			warn("[WeaponManager] Player " .. attackingPlayer.Name .. " tried to use tool owned by userId " .. tostring(ownerUserId))
 			return
 		end
-		
-		-- Verify tool still exists and is owned by the player
 		if not tool or not tool.Parent then
 			warn("[WeaponManager] Tool no longer exists")
 			return
 		end
-		
 		local isToolInPlayerInventory = false
-		if tool.Parent == attackingPlayer then
-			isToolInPlayerInventory = true
-		elseif tool.Parent == attackingPlayer.Backpack then
-			isToolInPlayerInventory = true
-		elseif tool.Parent == attackingPlayer.Character then
+		if tool.Parent == attackingPlayer or tool.Parent == attackingPlayer.Backpack or tool.Parent == attackingPlayer.Character then
 			isToolInPlayerInventory = true
 		end
-		
 		if not isToolInPlayerInventory then
 			print("[WeaponManager] Tool parent: " .. tostring(tool.Parent) .. ", expected player/backpack/character")
 			return
 		end
-		
-		WeaponManager.PerformAttack(attackingPlayer, tool)
+		-- Look up weapon speed on the server for safety
+		local weaponStats = WeaponData.GetWeaponStats(tool.Name)
+		local weaponSpeed = weaponStats and weaponStats.speed or 1
+		print("[WeaponManager] Calling PerformAttack for player '" .. attackingPlayer.Name .. "' with tool '" .. tool.Name .. "'")
+		WeaponManager.PerformAttack(attackingPlayer, tool, weaponSpeed)
+	end
+
+	local connection
+	local success, err = pcall(function()
+		connection = swingEvent.OnServerEvent:Connect(onSwingEvent)
 	end)
-	
-	-- Track this connection
+	if not success or not connection then
+		warn("[WeaponManager] Failed to connect SwingEvent for tool '" .. tool.Name .. "': " .. tostring(err))
+		return
+	end
+
 	toolConnections[uniqueToolId] = connection
-	
-	-- Track which tools belong to this player
-	playerToolIds[player.UserId] = playerToolIds[player.UserId] or {}
 	table.insert(playerToolIds[player.UserId], uniqueToolId)
-	
+	print("[WeaponManager] Connected tool '" .. tool.Name .. "' for player " .. player.Name .. " (toolId: " .. uniqueToolId .. ")")
 end
 
 -- Cleanup: Called when player respawns or disconnects

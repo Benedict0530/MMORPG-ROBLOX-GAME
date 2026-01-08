@@ -8,6 +8,7 @@ local ItemCollectionHandler = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local SFXEvent = ReplicatedStorage:FindFirstChild("SFXEvent")
 
 -- Dependencies will be injected
 local UnifiedDataStoreManager
@@ -20,7 +21,7 @@ local playerCollectCooldown = {}
 -- Track pending money to save periodically
 local pendingMoneySave = {}
 
-local COLLECT_DISTANCE = 10
+local COLLECT_DISTANCE = 50
 local COLLECT_COOLDOWN = 0.1
 
 -- Determine if an item is a coin or a drop
@@ -51,6 +52,7 @@ local function handleCoinCollection(player, coin)
 		if moneyValue then
 			moneyValue.Value = moneyValue.Value + coinValue
 			pendingMoneySave[player.UserId] = (pendingMoneySave[player.UserId] or 0) + coinValue
+			SFXEvent:FireClient(player, "CoinPickup")
 		end
 	end
 	
@@ -64,15 +66,37 @@ local function handleItemDropCollection(player, itemDrop)
 	if not itemName then
 		warn("[ItemCollectionHandler] Drop has no ItemName!")
 		itemsBeingCollected[itemDrop] = nil
-		return
+		return false
 	end
 	
-	-- Add item to player's inventory
-	local success = InventoryManager.AddItem(player, itemName)
+	print("[ItemCollectionHandler] Player " .. player.Name .. " collecting item: " .. itemName)
+	
+	-- Get item type from the drop if available, otherwise pass nil to let InventoryManager infer it
+	local itemTypeObj = itemDrop:FindFirstChild("ItemType")
+	local itemType = itemTypeObj and itemTypeObj.Value
+	
+	print("[ItemCollectionHandler] Item type from drop: " .. tostring(itemType))
+	
+	-- Add item to player's inventory with itemType
+	local success, errorOrId = InventoryManager.AddItem(player, itemName, itemType)
 	
 	if success then
+		print("[ItemCollectionHandler] Successfully added " .. itemName .. " to " .. player.Name .. "'s inventory")
+		SFXEvent:FireClient(player, "ItemPickup")
+		return true
 	else
-		warn("[ItemCollectionHandler] Failed to add " .. itemName .. " to player " .. player.Name .. " inventory")
+		-- Handle inventory full case
+		local errorMsg = errorOrId or "Failed to add item to inventory"
+		warn("[ItemCollectionHandler] " .. errorMsg .. " for player " .. player.Name)
+		
+		-- Notify player that inventory is full
+		if errorMsg == "Inventory is full!" then
+			local notificationEvent = ReplicatedStorage:FindFirstChild("NotificationEvent")
+			if notificationEvent then
+				notificationEvent:FireClient(player, "Inventory Full", "Your inventory is full! Max capacity: " .. tostring(player.Stats.InventoryMaxCapacity.Value), "error")
+			end
+		end
+		return false
 	end
 end
 
@@ -135,65 +159,115 @@ function ItemCollectionHandler.Initialize(unifiedDataStore, inventoryMgr)
 		if not player or not Players:FindFirstChild(player.Name) then
 			return
 		end
-		
+
+		-- If no item is provided, find the nearest valid collectible item
+		if not item then
+			if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+				return
+			end
+			local playerRoot = player.Character.HumanoidRootPart
+			local closestItem = nil
+			local closestDistance = COLLECT_DISTANCE
+			local closestIsCoin = false
+			
+			for _, candidate in ipairs(workspace:GetChildren()) do
+				if (candidate:FindFirstChild("CoinType") or candidate:FindFirstChild("ItemType")) and not itemsBeingCollected[candidate] then
+					local itemPivot = candidate:GetPivot()
+					if itemPivot then
+						local distance = (itemPivot.Position - playerRoot.Position).Magnitude
+						if distance <= closestDistance and canPlayerPickupItem(player, candidate) then
+							-- Check if this is a coin
+							local isCoin = candidate:FindFirstChild("CoinType") ~= nil
+							
+							-- Prioritize coins: always pick coin if closer, or if we don't have a coin yet
+							if isCoin then
+								if not closestIsCoin or distance < closestDistance then
+									closestDistance = distance
+									closestItem = candidate
+									closestIsCoin = true
+								end
+							-- Only pick non-coin items if we haven't found a coin
+							elseif not closestIsCoin then
+								closestDistance = distance
+								closestItem = candidate
+								closestIsCoin = false
+							end
+						end
+					end
+				end
+			end
+			item = closestItem
+		end
+
+		-- If still no item, nothing to collect
+		if not item then return end
+
 		-- Determine item type
 		local itemType = getItemType(item)
-		
+
 		-- Validate item exists and has proper structure
 		if not item or not item.Parent or not itemType then
 			return
 		end
-		
+
 		-- Prevent item duplication
 		if itemsBeingCollected[item] then
 			return
 		end
-		
+
 		-- Player collection rate limiting
 		local now = tick()
 		if playerCollectCooldown[player.UserId] and (now - playerCollectCooldown[player.UserId]) < COLLECT_COOLDOWN then
 			return
 		end
-		
+
 		-- Verify player character exists
 		if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
 			return
 		end
-		
+
 		local playerRoot = player.Character.HumanoidRootPart
-		
+
 		-- Get item position using GetPivot()
 		local itemPivot = item:GetPivot()
 		if not itemPivot then
 			return
 		end
-		
+
 		-- Verify distance (within 10 studs) - security check
 		local distance = (itemPivot.Position - playerRoot.Position).Magnitude
 		if distance > COLLECT_DISTANCE then
 			return
 		end
-		
+
 		-- Check ownership restrictions for both coins and drops
 		if not canPlayerPickupItem(player, item) then
 			-- Player is not allowed to pick up this item yet
 			return
 		end
-		
+
 		-- Mark item as being collected
 		itemsBeingCollected[item] = true
-		
+
+		local success = false
 		if itemType == "coin" then
 			handleCoinCollection(player, item)
+			success = true -- Coins are always successfully collected
 		elseif itemType == "drop" then
-			handleItemDropCollection(player, item)
+			local dropSuccess, errorOrId = handleItemDropCollection(player, item)
+			success = dropSuccess -- Use the actual success return from handleItemDropCollection
 		end
-		
+
 		-- Update collection cooldown
 		playerCollectCooldown[player.UserId] = now
-		
-		-- Destroy item after successful collection
-		item:Destroy()
+
+		-- Only destroy the item if it was successfully collected
+		if success then
+			item:Destroy()
+		else
+			-- Item collection failed (inventory full), remove from being collected
+			itemsBeingCollected[item] = nil
+		end
 	end)
 	
 	-- Save money periodically

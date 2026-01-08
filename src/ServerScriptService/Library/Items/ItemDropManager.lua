@@ -15,7 +15,7 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 	end
 	
 	-- Try to find item template in ServerStorage (check both direct and in subfolders)
-	local itemTemplate = ServerStorage:FindFirstChild(itemName)
+	local itemTemplate = ServerStorage:WaitForChild("Weapons"):FindFirstChild(itemName)
 	if not itemTemplate then
 		-- Try to find in Items folder or other locations
 		local itemsFolder = ServerStorage:FindFirstChild("Items")
@@ -88,7 +88,7 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 	weldPartsToRoot(item, primaryPart)
 	
 	-- Anchor the primary part so item stays in place (won't fall due to gravity)
-	primaryPart.Anchored = true
+	-- primaryPart.Anchored = true
 	
 	-- Now position the item using PivotTo while preserving the template's orientation
 	local finalSpawnPosition = spawnPosition
@@ -104,7 +104,9 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 	-- Apply collision group for items (same as coins)
 	local ITEM_GROUP = "Items"
 	pcall(function() PhysicsService:RegisterCollisionGroup(ITEM_GROUP) end)
-	
+	-- Always set Items-Env collidability
+	pcall(function() PhysicsService:CollisionGroupSetCollidable(ITEM_GROUP, "Env", true) end)
+	-- Set all parts to Items group
 	local function setItemCollisionGroup(obj)
 		if not obj then return end
 		if obj:IsA("BasePart") then 
@@ -142,6 +144,27 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		itemNameValue.Parent = item
 	else
 		itemNameValue.Value = itemName
+	end
+	
+	-- Store item type (weapon, armor, material, potion, etc.)
+	-- Get from WeaponData or use default
+	local itemTypeValue = item:FindFirstChild("ItemCategory")
+	local itemType = "weapon" -- default
+	pcall(function()
+		local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
+		local weaponStats = WeaponData.GetWeaponStats(itemName)
+		if weaponStats and weaponStats.itemType then
+			itemType = weaponStats.itemType
+		end
+	end)
+	
+	if not itemTypeValue then
+		itemTypeValue = Instance.new("StringValue")
+		itemTypeValue.Name = "ItemCategory"
+		itemTypeValue.Value = itemType
+		itemTypeValue.Parent = item
+	else
+		itemTypeValue.Value = itemType
 	end
 	
 	-- Transparency is handled client-side by ItemTransparencyHandler.client.lua

@@ -13,7 +13,7 @@ local inventoryStore = DataStoreService:GetDataStore("PlayerInventory")
 -- Configuration
 local SAVE_THROTTLE_INTERVAL = 0 -- Save at most every 1 second per player
 local CONFIG = {
-	THROTTLE_INTERVAL = 0, -- seconds
+	THROTTLE_INTERVAL = 5, -- seconds - INCREASED from 0 to prevent save conflicts
 	MAX_RETRIES = 3,
 	RETRY_DELAY = 0
 }
@@ -69,7 +69,18 @@ local function getCurrentStats(player)
 	
 	local data = {}
 	for _, stat in ipairs(stats:GetChildren()) do
-		data[stat.Name] = stat.Value
+		-- Skip folders, only process Value objects
+		if stat:IsA("ValueBase") then
+			data[stat.Name] = stat.Value
+		elseif stat.Name == "Equipped" and stat:IsA("Folder") then
+			-- Handle Equipped folder specially (has name/id children, not a Value)
+			local nameValue = stat:FindFirstChild("name")
+			local idValue = stat:FindFirstChild("id")
+			data["Equipped"] = {
+				name = nameValue and nameValue.Value or "",
+				id = idValue and idValue.Value or ""
+			}
+		end
 	end
 	return data
 end
@@ -244,6 +255,11 @@ function UnifiedDataStoreManager.SaveInventory(userId, inventoryData, forceImmed
 		return false
 	end
 	
+	print("[UnifiedDataStoreManager] Saving inventory for userId " .. userId .. " with " .. #inventoryData .. " items")
+	for i, item in ipairs(inventoryData) do
+		print("[UnifiedDataStoreManager]   Item " .. i .. ": " .. tostring(item.name))
+	end
+	
 	local success, err = pcall(function()
 		inventoryStore:SetAsync("Player_" .. userId, inventoryData)
 	end)
@@ -251,6 +267,7 @@ function UnifiedDataStoreManager.SaveInventory(userId, inventoryData, forceImmed
 	if success then
 		lastSaveTime[userId] = tick()
 		clearPending(userId, "inventory")
+		print("[UnifiedDataStoreManager] Successfully saved inventory for userId " .. userId)
 		return true
 	else
 		warn("[UnifiedDataStoreManager] Failed to save inventory for user " .. userId .. ": " .. tostring(err))
@@ -272,6 +289,16 @@ function UnifiedDataStoreManager.LoadInventory(userId)
 		return nil
 	end
 	
+	if data then
+		print("[UnifiedDataStoreManager] Loaded inventory for userId " .. userId .. ": " .. #data .. " items")
+		for i, item in ipairs(data) do
+			print("[UnifiedDataStoreManager]   Item " .. i .. ": " .. tostring(item.name or item))
+		end
+	else
+		print("[UnifiedDataStoreManager] No saved inventory data for userId " .. userId .. " (first time player)")
+	end
+	
+	-- Return data even if nil (caller should handle nil case)
 	return data
 end
 
