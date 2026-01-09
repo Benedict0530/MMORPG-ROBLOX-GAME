@@ -115,6 +115,10 @@ local function getWeaponImage(weaponName)
 	return ""
 end
 
+-- Forward declarations for functions used before definition
+local refreshInventory
+local updateCapacityDisplay
+
 -- Function to create inventory item UI
 
 local function createInventoryItem(itemData, index)
@@ -291,18 +295,26 @@ local function createInventoryItem(itemData, index)
 			secondButton = secondButton:FindFirstChildWhichIsA("TextButton")
 		end
 		if firstButton and secondButton then
-			local function immediateDeleteAndFire(action)
-				itemClone:Destroy()
+			local function fireAction(action)
+				-- Don't delete immediately - let server response trigger UI update
+				-- This prevents desync between client and server state
 				itemStats.Visible = false
 				itemActionEvent:FireServer(action, itemData.id)
+				
+				-- Also refresh inventory after a short delay as backup
+				-- This ensures UI updates even if server event doesn't fire
+				task.delay(0.3, function()
+					print("[InventoryUI] Auto-refresh after action: " .. action)
+					refreshInventory()
+				end)
 			end
 			local newEquipConn = firstButton.MouseButton1Click:Connect(function()
 				print("[InventoryUI] Equip button pressed for", itemData.name, "id:", itemData.id)
-				immediateDeleteAndFire("Equip")
+				fireAction("Equip")
 			end)
 			local newDropConn = secondButton.MouseButton1Click:Connect(function()
 				print("[InventoryUI] Drop button pressed for", itemData.name, "id:", itemData.id)
-				immediateDeleteAndFire("Drop")
+				fireAction("Drop")
 			end)
 			connectionsByButton[firstButton] = connectionsByButton[firstButton] or {}
 			connectionsByButton[firstButton].equipConn = newEquipConn
@@ -317,7 +329,7 @@ end
 
 
 -- Display inventory capacity
-local function updateCapacityDisplay()
+updateCapacityDisplay = function()
 	local stats = player:WaitForChild("Stats", 10)
 	if not stats then return end
 	
@@ -334,20 +346,9 @@ local function updateCapacityDisplay()
 end
 
 -- Function to refresh inventory display
-local function refreshInventory()
-	-- Clear button connection references for old items
-	for btn, btnConns in pairs(connectionsByButton) do
-		for _, conn in pairs(btnConns) do
-			if conn then conn:Disconnect() end
-		end
-	end
-	table.clear(connectionsByButton)
-	-- Clear existing items (keep template)
-	for _, child in ipairs(scrollingFrame:GetChildren()) do
-		if child ~= itemTemplate and child.Name:match("^Item_") then
-			child:Destroy()
-		end
-	end
+refreshInventory = function()
+	print("[InventoryUI] refreshInventory called!")
+	-- NOTE: Don't clear all button connections here - we'll only disconnect specific items that are being deleted
 
 	-- Get player inventory
 	local stats = player:WaitForChild("Stats", 10)
@@ -390,8 +391,9 @@ local function refreshInventory()
 		end
 	end
 
-	if not inventoryData or #inventoryData == 0 then
-		return
+	-- inventoryData might be nil or empty - that's okay, we still need to remove old items from UI
+	if not inventoryData then
+		inventoryData = {}
 	end
 
 	-- Find equipped item id
@@ -413,22 +415,78 @@ local function refreshInventory()
 		return (a.name or "") < (b.name or "")
 	end)
 
-	-- Create UI items for each inventory item, refreshing layout after each clone
+	-- Create a set of existing item IDs to avoid duplicates
+	local existingItemIds = {}
+	for _, child in ipairs(scrollingFrame:GetChildren()) do
+		if child ~= itemTemplate and child.Name:match("^Item_") then
+			local itemId = child:GetAttribute("ItemId")
+			if itemId then
+				existingItemIds[itemId] = child
+			end
+		end
+	end
+
+	-- Create UI items for each inventory item that doesn't already exist
+	-- Also update equipped indicator for existing items
 	local runService = game:GetService("RunService")
 	for index, itemData in ipairs(inventoryData) do
 		if itemData and itemData.name then
-			createInventoryItem(itemData, index)
-			-- Force layout update after each clone to ensure correct order and click organization
-			if layout then
-				runService.RenderStepped:Wait()
-				local contentX = layout.AbsoluteContentSize.X
-				local contentY = layout.AbsoluteContentSize.Y
-				local frameX = scrollingFrame.AbsoluteSize.X
-				local frameY = scrollingFrame.AbsoluteSize.Y
-				scrollingFrame.CanvasSize = UDim2.new(0, math.max(contentX, frameX), 0, math.max(contentY, frameY))
+			-- Only create if this item doesn't already exist
+			if not existingItemIds[itemData.id] then
+				createInventoryItem(itemData, index)
+				-- Force layout update after creating new item
+				if layout then
+					runService.RenderStepped:Wait()
+					local contentX = layout.AbsoluteContentSize.X
+					local contentY = layout.AbsoluteContentSize.Y
+					local frameX = scrollingFrame.AbsoluteSize.X
+					local frameY = scrollingFrame.AbsoluteSize.Y
+					scrollingFrame.CanvasSize = UDim2.new(0, math.max(contentX, frameX), 0, math.max(contentY, frameY))
+				end
+			else
+				-- Update equipped indicator for existing items
+				local existingItem = existingItemIds[itemData.id]
+				if existingItem then
+					local isEquipped = false
+					if equippedId and equippedId == itemData.id then
+						isEquipped = true
+					end
+					local equippedIndicator = existingItem:FindFirstChild("Equipped")
+					if equippedIndicator and equippedIndicator:IsA("GuiObject") then
+						equippedIndicator.Visible = isEquipped
+					end
+				end
 			end
 		else
 			warn("[InventoryUI] Invalid item data at index " .. index)
+		end
+	end
+	
+	-- Remove items that are no longer in inventory
+	for _, child in ipairs(scrollingFrame:GetChildren()) do
+		if child ~= itemTemplate and child.Name:match("^Item_") then
+			local itemId = child:GetAttribute("ItemId")
+			if itemId then
+				local stillExists = false
+				for _, itemData in ipairs(inventoryData) do
+					if itemData and itemData.id == itemId then
+						stillExists = true
+						break
+					end
+				end
+				if not stillExists then
+					-- Remove from button connections before destroying
+					for btn, btnConns in pairs(connectionsByButton) do
+						if btn.Parent == child or btn.Parent.Parent == child then
+							for _, conn in pairs(btnConns) do
+								if conn then conn:Disconnect() end
+							end
+							connectionsByButton[btn] = nil
+						end
+					end
+					child:Destroy()
+				end
+			end
 		end
 	end
 	
@@ -466,7 +524,9 @@ local function setupInventoryListener()
 
 	local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
 	if inventoryChangedEvent then
+		print("[InventoryUI] InventoryChanged listener connected")
 		connections.inventoryChanged = inventoryChangedEvent.OnClientEvent:Connect(function()
+			print("[InventoryUI] InventoryChanged event FIRED!")
 			refreshInventory()
 			updateCapacityDisplay()
 		end)
@@ -477,7 +537,9 @@ local function setupInventoryListener()
 	-- Listen for EquippedChanged event for immediate UI update on equip
 	local equippedChangedEvent = ReplicatedStorage:FindFirstChild("EquippedChanged")
 	if equippedChangedEvent then
+		print("[InventoryUI] EquippedChanged listener connected")
 		connections.equippedChanged = equippedChangedEvent.OnClientEvent:Connect(function()
+			print("[InventoryUI] EquippedChanged event FIRED!")
 			refreshInventory()
 		end)
 	end

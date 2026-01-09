@@ -107,12 +107,24 @@ local function savePlayerDataToStore(userId, forceImmediate)
 		return false
 	end
 	
+	-- CRITICAL: Verify stats folder exists before attempting save
+	local stats = player:FindFirstChild("Stats")
+	if not stats then
+		warn("[UnifiedDataStoreManager] CRITICAL: Stats folder missing for player " .. userId .. " - aborting save to prevent data loss")
+		return false
+	end
+	
 	isSaving[userId] = true
 	lastSaveTime[userId] = tick()
 	
 	local success, err = pcall(function()
 		statsStore:UpdateAsync("Player_" .. userId, function(oldData)
-			oldData = oldData or {}
+			-- CRITICAL: Never overwrite with nil or incomplete data
+			if not oldData or type(oldData) ~= "table" then
+				warn("[UnifiedDataStoreManager] LoadAsync returned nil/invalid for player " .. userId .. " - aborting update to prevent data loss")
+				return nil -- Return nil to abort the update
+			end
+			
 			local stats = player:FindFirstChild("Stats")
 			
 			if stats then
@@ -131,6 +143,9 @@ local function savePlayerDataToStore(userId, forceImmediate)
 						oldData[stat.Name] = stat.Value
 					end
 				end
+			else
+				warn("[UnifiedDataStoreManager] Stats folder disappeared during save for player " .. userId .. " - aborting")
+				return nil
 			end
 			
 			return oldData
@@ -169,6 +184,14 @@ end
 -- ===== LEVEL & EXPERIENCE FUNCTIONS =====
 function UnifiedDataStoreManager.SaveLevelData(player, forceImmediate)
 	if not player or not player.UserId then return false end
+	
+	-- CRITICAL: Verify player stats exist before saving
+	local stats = player:FindFirstChild("Stats")
+	if not stats then
+		warn("[UnifiedDataStoreManager] CRITICAL: Stats folder missing for player " .. tostring(player.Name) .. " - aborting level save")
+		return false
+	end
+	
 	markPending(player.UserId, "level")
 	markPending(player.UserId, "experience")
 	markPending(player.UserId, "neededExperience")
@@ -184,6 +207,14 @@ end
 -- ===== MONEY/COIN FUNCTIONS =====
 function UnifiedDataStoreManager.SaveMoney(player, forceImmediate)
 	if not player or not player.UserId then return false end
+	
+	-- CRITICAL: Verify player stats exist before saving
+	local stats = player:FindFirstChild("Stats")
+	if not stats then
+		warn("[UnifiedDataStoreManager] CRITICAL: Stats folder missing for player " .. tostring(player.Name) .. " - aborting money save")
+		return false
+	end
+	
 	markPending(player.UserId, "money")
 	return savePlayerDataToStore(player.UserId, forceImmediate)
 end
@@ -195,6 +226,12 @@ end
 -- ===== WEAPON DATA FUNCTIONS =====
 function UnifiedDataStoreManager.SaveWeaponData(userId, weaponData, forceImmediate)
 	if not userId then return false end
+	
+	-- CRITICAL SAFEGUARD: Never save nil or invalid weapon data
+	if not weaponData then
+		warn("[UnifiedDataStoreManager] WARNING: Weapon data is nil for userId " .. userId .. " - aborting save to prevent data loss")
+		return false
+	end
 	
 	if not forceImmediate and not canSaveNow(userId) then
 		markPending(userId, "weapons")
@@ -249,6 +286,24 @@ end
 -- ===== INVENTORY FUNCTIONS =====
 function UnifiedDataStoreManager.SaveInventory(userId, inventoryData, forceImmediate)
 	if not userId then return false end
+	
+	-- CRITICAL SAFEGUARD: Never save nil or invalid inventory data
+	if not inventoryData or type(inventoryData) ~= "table" then
+		warn("[UnifiedDataStoreManager] CRITICAL: Inventory data is nil or invalid for userId " .. userId .. " - aborting save to prevent data loss")
+		return false
+	end
+	
+	-- SAFEGUARD: Never save empty inventory without explicit validation
+	if #inventoryData == 0 then
+		warn("[UnifiedDataStoreManager] WARNING: Attempting to save EMPTY inventory for userId " .. userId .. " - possible data loss, check if this is intentional")
+		-- Still allow save, but log warning - let caller decide if this is ok
+	end
+	
+	-- SAFEGUARD: Detect suspicious inventory sizes that indicate data corruption
+	if #inventoryData > 1000 then
+		warn("[UnifiedDataStoreManager] CRITICAL: Inventory suspiciously large (" .. #inventoryData .. " items) for userId " .. userId .. " - aborting save to prevent corrupting DataStore")
+		return false
+	end
 	
 	if not forceImmediate and not canSaveNow(userId) then
 		markPending(userId, "inventory")
@@ -340,6 +395,13 @@ end
 -- Save all pending data for a player (called on disconnect)
 function UnifiedDataStoreManager.SaveAll(player, forceImmediate)
 	if not player or not player.UserId then return false end
+	
+	-- CRITICAL: Verify stats folder exists before attempting any saves
+	local stats = player:FindFirstChild("Stats")
+	if not stats then
+		warn("[UnifiedDataStoreManager] CRITICAL: Stats folder missing for player " .. tostring(player.Name) .. " at disconnect - aborting SaveAll to prevent data loss")
+		return false
+	end
 	
 	local userId = player.UserId
 	initPlayerTracking(userId)

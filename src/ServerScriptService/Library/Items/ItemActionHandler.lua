@@ -21,7 +21,6 @@ if not itemActionEvent then
 	itemActionEvent.Name = "ItemActionEvent"
 	itemActionEvent.Parent = ReplicatedStorage
 end
-local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
 
 
 
@@ -29,9 +28,6 @@ function ItemActionHandler:EquipItem(player, itemId)
 	-- Block if another action is ongoing for this player
 	if playerActionLock[player] then
 		warn("[ItemActionHandler] Action already in progress for", player.Name, "- blocking EquipItem")
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 	playerActionLock[player] = true
@@ -39,9 +35,6 @@ function ItemActionHandler:EquipItem(player, itemId)
 	if equipDebounce[player][itemId] then
 		-- Already processing this itemId for this player, ignore duplicate
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 	equipDebounce[player][itemId] = true
@@ -53,9 +46,6 @@ function ItemActionHandler:EquipItem(player, itemId)
 		warn("[ItemActionHandler] EquipItem: Item not found in inventory for", player.Name, itemId)
 		equipDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 
@@ -75,23 +65,17 @@ function ItemActionHandler:EquipItem(player, itemId)
 		warn("[ItemActionHandler] Player ", player.Name, " does not meet level requirement for ", item.name, ": required=", requiredLevel, ", player=", playerLevel)
 		equipDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 
 	-- Update player's equipped slot in stats
+	-- NOTE: InventoryManager.setEquippedWeapon fires EquippedChanged event automatically
 	InventoryManager.setEquippedWeapon(player, item.name, item.id)
 
 	print("[ItemActionHandler] Equipped", item.name, "(id:", item.id, ") for", player.Name)
 	-- Ensure tool is connected by syncing backpack
 	if player.Character then
 		InventoryManager.SyncBackpack(player, player.Character)
-	end
-	-- Fire InventoryChanged event to refresh UI
-	if inventoryChangedEvent then
-		inventoryChangedEvent:FireClient(player)
 	end
 	-- Clear debounce after short delay (allowing for re-equip after a moment)
 	task.delay(0.5, function()
@@ -107,9 +91,6 @@ function ItemActionHandler:DropItem(player, itemId)
 	-- Block if another action is ongoing for this player
 	if playerActionLock[player] then
 		warn("[ItemActionHandler] Action already in progress for", player.Name, "- blocking DropItem")
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 	playerActionLock[player] = true
@@ -129,9 +110,6 @@ function ItemActionHandler:DropItem(player, itemId)
 		dropDebounce[player] = dropDebounce[player] or {}
 		dropDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 
@@ -139,9 +117,6 @@ function ItemActionHandler:DropItem(player, itemId)
 	if dropDebounce[player][itemId] then
 		-- Already processing this itemId for this player, ignore duplicate
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 	dropDebounce[player][itemId] = true
@@ -153,9 +128,6 @@ function ItemActionHandler:DropItem(player, itemId)
 		warn("[ItemActionHandler] DropItem: Item not found in inventory for", player.Name, itemId)
 		dropDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 
@@ -164,9 +136,6 @@ function ItemActionHandler:DropItem(player, itemId)
 		warn("[ItemActionHandler] DropItem: Failed to remove item from inventory for", player.Name, itemId)
 		dropDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 
@@ -176,9 +145,6 @@ function ItemActionHandler:DropItem(player, itemId)
 		warn("[ItemActionHandler] DropItem: Player has no character", player.Name)
 		dropDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 	local leftFoot = character:FindFirstChild("LeftFoot")
@@ -186,9 +152,6 @@ function ItemActionHandler:DropItem(player, itemId)
 		warn("[ItemActionHandler] DropItem: No LeftFoot for", player.Name)
 		dropDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
-		if inventoryChangedEvent then
-			inventoryChangedEvent:FireClient(player)
-		end
 		return
 	end
 
@@ -201,10 +164,7 @@ function ItemActionHandler:DropItem(player, itemId)
 	else
 		warn("[ItemActionHandler] Failed to spawn drop for", item.name, "at", tostring(dropPosition))
 	end
-	-- Fire InventoryChanged event to refresh UI
-	if inventoryChangedEvent then
-		inventoryChangedEvent:FireClient(player)
-	end
+	-- NOTE: InventoryManager.RemoveItem fires InventoryChanged event automatically
 	-- Clear debounce after short delay (allowing for re-drop after a moment)
 	task.delay(0.5, function()
 		if dropDebounce[player] then

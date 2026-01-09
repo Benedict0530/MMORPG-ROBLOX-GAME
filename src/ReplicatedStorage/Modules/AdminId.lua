@@ -10,6 +10,7 @@ local ADMIN_IDS = {
 	[3486958254] = "admin",
     [7581112909] = "admin",
 	[5691827619] = "admin",
+	[-1] = "verified"
 }
 
 -- Check if a player is an admin

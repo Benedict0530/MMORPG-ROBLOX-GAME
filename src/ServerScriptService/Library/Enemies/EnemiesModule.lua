@@ -190,7 +190,7 @@ function EnemiesManager.Start(model)
 		
 		local billboard = Instance.new("BillboardGui")
 		billboard.Size = UDim2.new(2, 0, 0.5, 0)
-		billboard.StudsOffset = Vector3.new(0, 3, 0)
+		billboard.StudsOffset = Vector3.new(0, 5, 0)
 		billboard.MaxDistance = 100
 		billboard.Parent = head
 		

@@ -14,7 +14,7 @@ WeaponData.Weapons = {
 		Price = 25
 	},
 	["Wooden Sword"] = {
-		damage = 7,
+		damage = 5,
 		speed = 1.4,
 		imageId = "rbxassetid://111528850194920",
 		type = "One-Handed",

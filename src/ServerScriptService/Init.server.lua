@@ -22,6 +22,8 @@ end
 
 -- Create all RemoteEvents that modules need
 createRemoteEvent("InventoryChanged", ReplicatedStorage)
+createRemoteEvent("EquippedChanged", ReplicatedStorage)
+createRemoteEvent("ItemActionEvent", ReplicatedStorage)
 createRemoteEvent("AllocateStatPoint", ReplicatedStorage)
 createRemoteEvent("EnemyDamage", ReplicatedStorage)
 createRemoteEvent("PlayerRunning", ReplicatedStorage)
@@ -283,12 +285,26 @@ if not success then
 	warn("[GloopCrusher] Could not verify Coins-Players collision relationship")
 end
 
+-- === ADMIN COMMANDS SYSTEM ===
+
+local AdminCommandsHandler
+success, err = pcall(function()
+	AdminCommandsHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("AdminCommandsHandler"))
+end)
+if success then
+	print("[Init] ✅ AdminCommandsHandler loaded")
+else
+	warn("[Init] ⚠️ Failed to load AdminCommandsHandler: " .. tostring(err))
+end
+
 -- === ITEM COLLECTION SETUP ===
 if ItemCollectionHandler then
 	ItemCollectionHandler.Initialize(UnifiedDataStoreManager, InventoryManager)
 end
 
 -- === SERVER READY ===
+
+print("[Init] 🎮 SERVER READY - All systems initialized")
 
 -- Keep the script running
 while true do

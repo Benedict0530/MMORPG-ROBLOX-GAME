@@ -230,6 +230,13 @@ function InventoryManager.setEquippedWeapon(player, weaponName, itemId)
 	else
 		print("[InventoryManager] FAILED: No Character found for " .. player.Name)
 	end
+	
+	-- Fire EquippedChanged event for quick UI update (equipped indicator)
+	local equippedChangedEvent = ReplicatedStorage:FindFirstChild("EquippedChanged")
+	if equippedChangedEvent then
+		equippedChangedEvent:FireClient(player)
+	end
+	
 	clearLocks()
 end
 
@@ -302,14 +309,26 @@ function InventoryManager.SaveInventory(player, forceImmediate)
 	local userId = player.UserId
 	local data = playerInventories[userId] or {}
 	
+	-- CRITICAL SAFEGUARD: Prevent data loss from empty saves
+	if not data or type(data) ~= "table" then
+		warn("[InventoryManager] ⚠️ CRITICAL: Inventory data is nil or invalid for " .. player.Name .. " (userId: " .. userId .. ") - aborting save to prevent data loss")
+		return false
+	end
+	
 	-- SAFEGUARD: Validate inventory before saving
 	-- Never save empty inventory unless player is completely new (0 items intentional)
-	if not data or #data == 0 then
+	if #data == 0 then
 		-- If player already had items loaded, don't save empty data
 		if inventoriesLoaded[userId] and inventoriesLoaded[userId] == true then
 			warn("[InventoryManager] ⚠️ Prevented save of EMPTY inventory for " .. player.Name .. " - data loss protection!")
 			return false  -- Don't save empty data over good data
 		end
+	end
+	
+	-- Additional safeguard: If we're about to save, verify current in-memory data is reasonable
+	if #data > 1000 then
+		warn("[InventoryManager] ⚠️ CRITICAL: Inventory size suspiciously large (" .. #data .. ") - possible data corruption, aborting save")
+		return false
 	end
 	
 	print("[InventoryManager] Saving inventory for " .. player.Name .. ": " .. #data .. " items (forceImmediate=" .. tostring(forceImmediate) .. ")")
@@ -344,6 +363,12 @@ function InventoryManager.AddItem(player, itemName, itemType)
 		if not playerInventories[userId] or type(playerInventories[userId]) ~= "table" then
 			playerInventories[userId] = createDefaultInventory()
 		end
+	end
+	
+	-- CRITICAL: Prevent adding to nil inventory
+	if not playerInventories[userId] or type(playerInventories[userId]) ~= "table" or #playerInventories[userId] < 0 then
+		warn("[InventoryManager] 🚨 CRITICAL: Inventory still invalid after init attempt for " .. player.Name .. " - aborting AddItem to prevent data loss")
+		return false, "Inventory initialization failed"
 	end
 	
 	-- Check inventory capacity before adding
@@ -446,6 +471,12 @@ function InventoryManager.LoadInventory(player)
 	
 	print("[InventoryManager] Loading inventory for " .. player.Name .. " (UserId: " .. userId .. ")")
 	
+	-- CRITICAL: Don't reload if already loaded in this session (prevents overwriting with stale DataStore data)
+	if inventoriesLoaded[userId] and inventoriesLoaded[userId] == true then
+		print("[InventoryManager] ✅ Inventory already loaded for " .. player.Name .. " - skipping reload to prevent data loss")
+		return
+	end
+	
 	-- Load from unified manager with retry logic
 	local retries = 0
 	local maxRetries = 3
@@ -473,6 +504,12 @@ function InventoryManager.LoadInventory(player)
 	else
 		playerInventories[userId] = createDefaultInventory()
 		print("[InventoryManager] Created default inventory (loaded data was not a table)")
+	end
+	
+	-- CRITICAL: Validate inventory is never nil or invalid
+	if not playerInventories[userId] or type(playerInventories[userId]) ~= "table" then
+		warn("[InventoryManager] 🚨 CRITICAL: Inventory is still invalid after load attempt - forcing default")
+		playerInventories[userId] = createDefaultInventory()
 	end
 	
 	-- Update InventoryCapacity stat to reflect actual inventory count
@@ -541,9 +578,12 @@ function InventoryManager.SyncBackpack(player, character)
 		equippedWeaponName = equipped.name
 		equippedItemId = equipped.id
 	end
+	
+	-- FIX: If no equipped weapon found but inventory has items, equip first item
 	if (not equippedWeaponName or equippedWeaponName == "") and #inventory > 0 then
 		equippedWeaponName = inventory[1].name
 		equippedItemId = inventory[1].id
+		-- Validate the item exists in inventory
 		local found = false
 		for _, item in ipairs(inventory) do
 			if item.id == equippedItemId then
@@ -551,16 +591,20 @@ function InventoryManager.SyncBackpack(player, character)
 				break
 			end
 		end
+		-- If not found in inventory, use first item's ID instead
 		if not found then
-			InventoryManager.setEquippedWeapon(player, equippedWeaponName, equippedItemId)
+			equippedItemId = inventory[1].id
 		end
+		-- Update stats to reflect the equipped item
+		InventoryManager.setEquippedWeapon(player, equippedWeaponName, equippedItemId)
 	end
 	local equippedTool = nil
 	if equippedWeaponName and equippedWeaponName ~= "" then
 		local baseWeaponName = equippedWeaponName:match("^([^_]+)") or equippedWeaponName
 		local tool = weaponsFolder:FindFirstChild(baseWeaponName)
 		if not tool then
-			print("[InventoryManager] FAILED: Tool '" .. baseWeaponName .. "' not found in ReplicatedStorage.Weapons for " .. player.Name)
+			warn("[InventoryManager] FAILED: Tool '" .. baseWeaponName .. "' not found in ReplicatedStorage.Weapons for " .. player.Name)
+			-- Don't return, try to equip something else
 		else
 			local clone = tool:Clone()
 			clone.Parent = player
@@ -580,38 +624,77 @@ function InventoryManager.SyncBackpack(player, character)
 			end
 		end
 	end
+	
+	-- If equippedTool is nil, try to find any weapon from first inventory item as fallback
+	if not equippedTool and #inventory > 0 then
+		print("[InventoryManager] ⚠️ Fallback: No equipped tool found, trying first inventory item for " .. player.Name)
+		local firstItem = inventory[1]
+		local baseWeaponName = firstItem.name:match("^([^_]+)") or firstItem.name
+		local tool = weaponsFolder:FindFirstChild(baseWeaponName)
+		if tool then
+			local clone = tool:Clone()
+			clone.Parent = player
+			clone:SetAttribute("_ItemId", firstItem.id)
+			clone:SetAttribute("_OwnerUserId", player.UserId)
+			print("[InventoryManager] Fallback: Created weapon " .. clone.Name .. " from inventory")
+			task.wait(0.15)
+			if clone.Parent == player then
+				equippedTool = clone
+				equippedItemId = firstItem.id
+			end
+		end
+	end
 	if equippedTool then
 		task.wait(0.15)
 		if not equippedTool or equippedTool.Parent ~= player then
 			print("[InventoryManager] FAILED: Equipped tool no longer in player backpack for " .. player.Name)
 			equipLocks[player] = nil
+			connectInProgress[player] = nil
 			return
 		end
 		if not humanoid or not character.Parent or humanoid.Health <= 0 then
 			print("[InventoryManager] FAILED: Humanoid invalid or character dead before equipping for " .. player.Name)
 			equipLocks[player] = nil
+			connectInProgress[player] = nil
 			return
 		end
-		local success, err = pcall(function()
-			humanoid:EquipTool(equippedTool)
-		end)
-		if not success then
-			print("[InventoryManager] FAILED: Could not equip tool '" .. equippedTool.Name .. "' for " .. player.Name .. ": " .. tostring(err))
-		else
-			print("[InventoryManager] Weapon EQUIPPED for " .. player.Name .. ": " .. equippedTool.Name)
+		
+		-- Try to equip with multiple retries
+		local equipped = false
+		for attempt = 1, 3 do
+			if equippedTool and equippedTool.Parent == player then
+				local success, err = pcall(function()
+					humanoid:EquipTool(equippedTool)
+				end)
+				if success then
+					task.wait(0.1)
+					-- Check if actually equipped
+					if equippedTool.Parent == character then
+						print("[InventoryManager] Weapon EQUIPPED for " .. player.Name .. ": " .. equippedTool.Name .. " (attempt " .. attempt .. ")")
+						equipped = true
+						break
+					else
+						print("[InventoryManager] Equip attempt " .. attempt .. " failed - tool not in character for " .. player.Name)
+					end
+				else
+					print("[InventoryManager] Equip attempt " .. attempt .. " failed with error: " .. tostring(err))
+				end
+			end
+			
+			if attempt < 3 then
+				task.wait(0.2)
+			end
+		end
+		
+		if equipped then
 			-- Mark player as fully loaded after successful weapon equip
 			local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
 			DamageManager.MarkPlayerLoaded(player)
+		else
+			print("[InventoryManager] ⚠️ WARNING: Could not equip weapon for " .. player.Name .. " after 3 attempts")
 		end
-		task.wait(0.15)
-		if equippedTool and equippedTool.Parent ~= character then
-			local retrySuccess = pcall(function()
-				humanoid:EquipTool(equippedTool)
-			end)
-			if retrySuccess then
-				task.wait(0.1)
-			end
-		end
+		
+		-- Final connection attempt
 		if equippedTool and equippedTool.Parent == character then
 			local success2, err2 = pcall(function()
 				WeaponManager.ConnectTool(equippedTool, player)
@@ -628,7 +711,7 @@ function InventoryManager.SyncBackpack(player, character)
 						WeaponManager.ConnectTool(equippedTool, player)
 					end)
 					if ok2 then
-						-- print("[InventoryManager] RE-CONNECTED (" .. i .. "): " .. player.Name .. " - " .. equippedTool.Name .. " (id: " .. tostring(equippedItemId) .. ")")
+						-- Successfully reconnected
 					else
 						print("[InventoryManager] FAILED: re-connect (" .. i .. ") '" .. equippedTool.Name .. "' for " .. player.Name .. ": " .. tostring(err3))
 					end
@@ -640,7 +723,7 @@ function InventoryManager.SyncBackpack(player, character)
 			print("[InventoryManager] FAILED: Tool is not in character after equipping for " .. player.Name)
 		end
 	else
-		print("[InventoryManager] FAILED: No equipped tool found for " .. player.Name)
+		print("[InventoryManager] ⚠️ WARNING: No weapon to equip for " .. player.Name)
 	end
 	equipLocks[player] = nil
 	connectInProgress[player] = nil
@@ -663,15 +746,24 @@ function InventoryManager.GiveStartingItemsIfNew(player)
 	end
 	if #inventory < 1 or not equippedOk then
 		-- Only create starter inventory/equipped if missing (should only happen for legacy data)
-		local starterInventory, equipped = InventoryManager.CreateStarterWeaponAndEquipped()
-		local userId = player.UserId
-		playerInventories[userId] = starterInventory
-		if equipped and equipped.name and equipped.id then
-			InventoryManager.setEquippedWeapon(player, equipped.name, equipped.id)
+		-- CRITICAL: NEVER directly overwrite playerInventories if it already has valid data
+		if #inventory < 1 then
+			local starterInventory, equipped = InventoryManager.CreateStarterWeaponAndEquipped()
+			local userId = player.UserId
+			playerInventories[userId] = starterInventory
+			if equipped and equipped.name and equipped.id then
+				InventoryManager.setEquippedWeapon(player, equipped.name, equipped.id)
+			end
+			InventoryManager.SaveInventory(player, true)
+			local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+			UnifiedDataStoreManager.SaveStats(player, true)
+		elseif not equippedOk then
+			-- Inventory exists but equipped is missing - just set equipped without replacing inventory
+			local equipped = InventoryManager.GetInventory(player)[1]
+			if equipped then
+				InventoryManager.setEquippedWeapon(player, equipped.name, equipped.id)
+			end
 		end
-		InventoryManager.SaveInventory(player, true)
-		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-		UnifiedDataStoreManager.SaveStats(player, true)
 	else
 		print("[InventoryManager] Player already has items and equipped, skipping starting item")
 	end
@@ -732,28 +824,35 @@ task.spawn(function()
 						
 						print("[InventoryManager] ✅ Humanoid ready for " .. player.Name)
 						
-						-- Small delay to ensure character is fully loaded
-						task.wait(0.3)
+						-- Longer delay to ensure character and all parts are fully loaded
+						-- This is critical for weapon equipping to work properly
+						task.wait(0.5)
 						
-					-- FIXED: Don't reload from DataStore on respawn - keeps in-memory inventory intact
-					-- This prevents losing recently acquired items that haven't been saved yet
-					-- Inventory is already loaded on PlayerAdded and only updated when items are collected
-					print("[InventoryManager] ✅ Using existing inventory for respawn (no reload) for " .. player.Name)
-					
-					-- Cleanup old connections
-					local WeaponManager = require(script.Parent.WeaponManager)
-					if WeaponManager.CleanupPlayerTools then
-						print("[InventoryManager] 🧹 Calling CleanupPlayerTools for " .. player.Name)
-						WeaponManager.CleanupPlayerTools(player)
-						print("[InventoryManager] 🧹 CleanupPlayerTools complete for " .. player.Name)
-					else
-						print("[InventoryManager] ⚠️ CleanupPlayerTools not found in WeaponManager")
-					end
+						-- FIXED: Don't reload from DataStore on respawn - keeps in-memory inventory intact
+						-- This prevents losing recently acquired items that haven't been saved yet
+						-- Inventory is already loaded on PlayerAdded and only updated when items are collected
+						print("[InventoryManager] ✅ Using existing inventory for respawn (no reload) for " .. player.Name)
+						
+						-- Cleanup old connections
+						local WeaponManager = require(script.Parent.WeaponManager)
+						if WeaponManager.CleanupPlayerTools then
+							print("[InventoryManager] 🧹 Calling CleanupPlayerTools for " .. player.Name)
+							WeaponManager.CleanupPlayerTools(player)
+							print("[InventoryManager] 🧹 CleanupPlayerTools complete for " .. player.Name)
+						else
+							print("[InventoryManager] ⚠️ CleanupPlayerTools not found in WeaponManager")
+						end
 
-						-- Sync backpack
+						-- Sync backpack with proper error handling
 						print("[InventoryManager] 🎯 Syncing backpack for " .. player.Name)
-						InventoryManager.SyncBackpack(player, currentChar)
-						print("[InventoryManager] ✅ SyncBackpack complete for " .. player.Name)
+						local syncSuccess, syncErr = pcall(function()
+							InventoryManager.SyncBackpack(player, currentChar)
+						end)
+						if syncSuccess then
+							print("[InventoryManager] ✅ SyncBackpack complete for " .. player.Name)
+						else
+							warn("[InventoryManager] ⚠️ SyncBackpack error for " .. player.Name .. ": " .. tostring(syncErr))
+						end
 					end)
 					
 					if not success then
@@ -791,7 +890,7 @@ Players.PlayerAdded:Connect(function(player)
 					return
 				end
 				
-				task.wait(0.3)
+				task.wait(0.5)
 				
 				-- Cleanup old connections
 				local WeaponManager = require(script.Parent.WeaponManager)
@@ -824,7 +923,7 @@ Players.PlayerAdded:Connect(function(player)
 						return
 					end
 					
-					task.wait(0.3)
+					task.wait(0.5)
 					
 					-- Cleanup old connections
 					local WeaponManager = require(script.Parent.WeaponManager)
@@ -847,8 +946,26 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
+	-- CRITICAL: Validate inventory exists before saving to prevent data loss
+	local inventory = playerInventories[player.UserId]
+	if not inventory or type(inventory) ~= "table" then
+		warn("[InventoryManager] ⚠️ WARNING: Inventory is invalid for " .. player.Name .. " on disconnect - skipping save to prevent data loss")
+		-- Still cleanup, but don't attempt to save corrupted data
+		playerInventories[player.UserId] = nil
+		inventoriesLoaded[player.UserId] = nil
+		lastInventorySaveTime[player.UserId] = nil
+		pendingInventoryChanges[player.UserId] = nil
+		lastKnownCharacters[player.UserId] = nil
+		return
+	end
+	
+	-- Only save if inventory has valid data
+	if #inventory == 0 and inventoriesLoaded[player.UserId] then
+		warn("[InventoryManager] ⚠️ WARNING: Saving empty inventory for " .. player.Name .. " - possible data loss")
+	end
+	
 	-- Force save inventory through unified manager
-	UnifiedDataStoreManager.SaveInventory(player.UserId, playerInventories[player.UserId] or {}, true)
+	UnifiedDataStoreManager.SaveInventory(player.UserId, inventory, true)
 	
 	-- Cleanup tracking
 	playerInventories[player.UserId] = nil

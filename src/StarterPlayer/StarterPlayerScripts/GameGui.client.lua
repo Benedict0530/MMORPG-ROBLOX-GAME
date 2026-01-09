@@ -429,28 +429,6 @@ local function resetStatsRequest()
 	end
 end
 
--- ============ THUMBSTICK VISIBILITY FUNCTION ============
-local function updateThumbstickVisibility()
-	local thumbstickGui = playerGui:FindFirstChild("ThumbstickGui")
-	if not thumbstickGui then return end
-	
-	-- Get UI state
-	local statsInfo = gameGuiFrame and gameGuiFrame:FindFirstChild("StatsInfo")
-	local inventoryUI = gameGuiFrame and gameGuiFrame:FindFirstChild("InventoryUI")
-	
-	-- Check if either UI is visible
-	local statsInfoOpen = statsInfo and statsInfo.Visible or false
-	local inventoryUIOpen = inventoryUI and inventoryUI.Visible or false
-	
-	-- Disable thumbstick if either UI is open, otherwise enable if touch is enabled
-	local UserInputService = game:GetService("UserInputService")
-	if statsInfoOpen or inventoryUIOpen then
-		thumbstickGui.Enabled = false
-	else
-		thumbstickGui.Enabled = UserInputService.TouchEnabled
-	end
-end
-
 -- ============ CHARACTER SETUP ============
 local function setupCharacter(newCharacter)
 	-- Cleanup old connections
@@ -532,8 +510,6 @@ local function setupCharacter(newCharacter)
 		if characterButton and statsInfo then
 			connections.characterButton = characterButton.MouseButton1Click:Connect(function()
 				statsInfo.Visible = not statsInfo.Visible
-				-- Update thumbstick visibility
-				updateThumbstickVisibility()
 			end)
 		end
 	end
@@ -545,8 +521,6 @@ local function setupCharacter(newCharacter)
 		if inventoryButton and inventoryUI then
 			connections.inventoryButton = inventoryButton.MouseButton1Click:Connect(function()
 				inventoryUI.Visible = not inventoryUI.Visible
-				-- Update thumbstick visibility
-				updateThumbstickVisibility()
 			end)
 		end
 	end

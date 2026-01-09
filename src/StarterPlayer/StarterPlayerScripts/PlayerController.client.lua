@@ -27,45 +27,26 @@ local stats = player:WaitForChild("Stats", 5)
 local currentMana = stats and stats:WaitForChild("CurrentMana", 5)
 local maxMana = stats and stats:WaitForChild("MaxMana", 5)
 
--- Disable default Roblox controls
-local Controls = require(player.PlayerScripts.PlayerModule):GetControls()
-Controls:Disable()
+-- Use Roblox default controls
+-- Default controls enabled - WASD for movement, Space for jump, Shift for sprint
 
--- Disable default ShiftLock permanently
-local playerModule = player.PlayerScripts.PlayerModule
-local cameraModule = require(playerModule:WaitForChild("CameraModule"))
-pcall(function() cameraModule:SetShiftLockMode(false) end)
-
--- Create RemoteEvent for sending running state to server
-local runningEvent = ReplicatedStorage:FindFirstChild("PlayerRunning")
-if not runningEvent then
-	runningEvent = Instance.new("RemoteEvent")
-	runningEvent.Name = "PlayerRunning"
-	runningEvent.Parent = ReplicatedStorage
-end
-
--- ========== MOVEMENT SETTINGS ==========
-local MOVE_SPEED = 12
-local SPRINT_SPEED = 25
-local isSprinting = false
+-- Get PlayerRunning event created by server
+local runningEvent = ReplicatedStorage:WaitForChild("PlayerRunning")
 
 -- ========== ANIMATION TRACKING ==========
 local animator = humanoid:FindFirstChildOfClass("Animator")
 local currentAnimationTrack = nil
-local isWalking = false
 local lastAnimationType = nil
-
--- ========== INPUT TRACKING ==========
-local keysPressed = {
-	D = false,
-	A = false,
-	W = false
-}
+local lastAnimationChangeTime = 0
+local ANIMATION_CHANGE_COOLDOWN = 0
+local MOVEMENT_START_THRESHOLD = 5 -- Velocity needed to START walking from idle
+local MOVEMENT_STOP_THRESHOLD = 3 -- Velocity needed to STOP walking back to idle (hysteresis)
 
 -- ========== WEAPON SETTINGS ==========
 local lastAttackTimes = {}
 local currentTool = nil
-local isSpaceHeld = false
+local isMousePressed = false
+local isSprinting = false
 local attackLoopConnection = nil
 local attackAnimationConnection = nil
 local isAttacking = false
@@ -74,49 +55,12 @@ local heldAttackOverride = false -- If true, weapon speed is forced to 2
 local attackPressStartTime = 0
 local ATTACK_HOLD_THRESHOLD = 0.2 -- seconds to consider as 'held'
 
--- ========== THUMBSTICK SETUP ==========
-local thumbstickInput = Vector3.new(0, 0, 0)
+-- ========== MOBILE SETUP ==========
 local isOnMobile = UserInputService.TouchEnabled
-local THUMBSTICK_DEADZONE = 0.05
-local thumbstickActive = false
-local currentTouchId = nil
-local thumbstickY = 0
-
-local function createThumbstick()
-	local playerGui = player:WaitForChild("PlayerGui")
-	
-	local container = playerGui:WaitForChild("ThumbstickGui")
-	local thumbstickArea = container:WaitForChild("Frame"):WaitForChild("ThumbStickArea")
-	local background = thumbstickArea:WaitForChild("ThumbstickBackground")
-	local thumb = thumbstickArea:WaitForChild("ThumbstickThumb")
-	
-	thumb.AnchorPoint = Vector2.new(0.5, 0.5)
-	thumb.Position = UDim2.new(0.5, 0, 0.5, 0)
-	
-	return {
-		container = container,
-		background = background,
-		thumb = thumb,
-		thumbstickArea = thumbstickArea
-	}
-end
-
-local thumbstick = nil
-if isOnMobile then
-	thumbstick = createThumbstick()
-end
-
 local playerGui = player:WaitForChild("PlayerGui")
-local thumbstickGui = playerGui:FindFirstChild("ThumbstickGui")
-if thumbstickGui then
-	thumbstickGui.Enabled = isOnMobile
-end
-
-if isOnMobile and thumbstick then
-	thumbstick.thumbstickArea.Visible = false
-end
-
 local gameGui = playerGui:FindFirstChild("GameGui")
+
+-- Show mobile buttons on touch devices
 if gameGui then
 	local frame = gameGui:FindFirstChild("Frame")
 	if frame then
@@ -141,7 +85,6 @@ end
 local childAddedConnection
 local childRemovedConnection
 local attackButtonConnection
-local hideThumbstickDebounce
 
 -- ========== CHARACTER SETUP ==========
 local function setupCharacter(newCharacter)
@@ -155,12 +98,11 @@ local function setupCharacter(newCharacter)
 	animator = humanoid:FindFirstChildOfClass("Animator")
 	currentTool = nil
 	lastAttackTimes = {}
-	isWalking = false
 	currentAnimationTrack = nil
 	lastAnimationType = nil
-	runningEvent:FireServer(false)
-	isSprinting = false
-	lockedXPosition = nil
+
+    -- Reference to Animate script
+    local animateScript = character:FindFirstChild("Animate")
 	
 	if not stats then
 		stats = player:WaitForChild("Stats", 5)
@@ -171,7 +113,6 @@ local function setupCharacter(newCharacter)
 	end
 	
 	-- Reconnect to new character
-
 	childAddedConnection = character.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") then
 			currentTool = child
@@ -180,6 +121,12 @@ local function setupCharacter(newCharacter)
 			if weaponChangedEvent and weaponChangedEvent:IsA("BindableEvent") then
 				weaponChangedEvent:Fire()
 			end
+
+            -- Disable Animate script when tool is equipped
+            local animateScript = character:FindFirstChild("Animate")
+            if animateScript then
+                animateScript.Disabled = true
+            end
 			-- Play Idle animation on loop when weapon is equipped
 			local idleAnimation = child:FindFirstChild("Idle")
 			if idleAnimation and idleAnimation:IsA("Animation") then
@@ -190,6 +137,8 @@ local function setupCharacter(newCharacter)
 					local track = animator:LoadAnimation(idleAnimation)
 					track.Looped = true
 					track:Play()
+					currentAnimationTrack = track
+					lastAnimationType = "Idle"
 				end
 			end
 		end
@@ -204,6 +153,12 @@ local function setupCharacter(newCharacter)
 			if weaponChangedEvent and weaponChangedEvent:IsA("BindableEvent") then
 				weaponChangedEvent:Fire()
 			end
+
+            -- Re-enable Animate script when tool is unequipped
+            local animateScript = character:FindFirstChild("Animate")
+            if animateScript then
+                animateScript.Disabled = false
+            end
 		end
 	end)
 end
@@ -305,6 +260,8 @@ local function performAttack(tool)
 					local idleTrack = animator:LoadAnimation(idleAnimation)
 					idleTrack.Looped = true
 					idleTrack:Play()
+					currentAnimationTrack = idleTrack
+					lastAnimationType = "Idle"
 				end
 			end
 			isAttacking = false
@@ -316,73 +273,35 @@ local function performAttack(tool)
 		isAnimationInProgress = false
 	end
 end
-
--- ========== THUMBSTICK FUNCTIONS ==========
-local function handleThumbstickInput(input, gameProcessed)
-	if not thumbstick then return end
+-- ========== RUN BUTTON SETUP ==========
+local function setupRunButton()
+	local playerGui = player:WaitForChild("PlayerGui")
+	local gameGui = playerGui:FindFirstChild("GameGui")
+	if not gameGui then return end
 	
-	local touchPosition = input.Position
-	local backgroundSize = thumbstick.background.AbsoluteSize
-	local backgroundPos = thumbstick.background.AbsolutePosition
+	local frame = gameGui:FindFirstChild("Frame")
+	if not frame then return end
 	
-	local relativeX = touchPosition.X - (backgroundPos.X + backgroundSize.X / 2)
-	local relativeY = touchPosition.Y - (backgroundPos.Y + backgroundSize.Y / 2)
+	local runButton = frame:FindFirstChild("RunButton")
+	if not runButton then return end
 	
-	local distance = math.sqrt(relativeX ^ 2 + relativeY ^ 2)
-	local maxDistance = math.min(backgroundSize.X, backgroundSize.Y) / 2
+	runButton.Visible = UserInputService.TouchEnabled
 	
-	if distance > maxDistance then
-		relativeX = (relativeX / distance) * maxDistance
-		relativeY = (relativeY / distance) * maxDistance
-	end
+	runButton.MouseButton1Down:Connect(function()
+		if currentMana and currentMana.Value > 0 then
+			isSprinting = true
+			runningEvent:FireServer(true)
+		else
+			isSprinting = false
+			runningEvent:FireServer(false)
+		end
+	end)
 	
-	thumbstick.thumb.Position = UDim2.new(0.32, relativeX, 0.45, relativeY)
-	
-	local inputX = relativeX / maxDistance
-	local inputY = -relativeY / maxDistance
-	
-	local magnitudeX = math.abs(inputX)
-	if magnitudeX < THUMBSTICK_DEADZONE then
-		inputX = 0
-	else
-		local scale = (magnitudeX - THUMBSTICK_DEADZONE) / (1 - THUMBSTICK_DEADZONE)
-		inputX = (inputX / magnitudeX) * scale
-	end
-	
-	thumbstickInput = Vector3.new(-inputX, 0, 0)
-	thumbstickActive = true
-	thumbstickY = inputY
+	runButton.MouseButton1Up:Connect(function()
+		isSprinting = false
+		runningEvent:FireServer(false)
+	end)
 end
-
-local function handleThumbstickRelease(input, gameProcessed)
-	if not thumbstick then return end
-	
-	thumbstick.thumb.Position = UDim2.new(0.32, 0, 0.45, 0)
-	thumbstickInput = Vector3.new(0, 0, 0)
-	thumbstickY = 0
-	thumbstickActive = false
-end
-
-local function isTouchOnThumbstick(touchPosition)
-	if not thumbstick then return false end
-	
-	local backgroundPos = thumbstick.background.AbsolutePosition
-	local backgroundSize = thumbstick.background.AbsoluteSize
-	
-	return (
-		touchPosition.X >= backgroundPos.X and
-		touchPosition.X <= backgroundPos.X + backgroundSize.X and
-		touchPosition.Y >= backgroundPos.Y and
-		touchPosition.Y <= backgroundPos.Y + backgroundSize.Y
-	)
-end
-
-local function hideThumbstickArea()
-	if thumbstick and not currentTouchId then
-		thumbstick.thumbstickArea.Visible = false
-	end
-end
-
 -- ========== ATTACK BUTTON SETUP ==========
 local function setupAttackButton()
 	local playerGui = player:WaitForChild("PlayerGui")
@@ -403,14 +322,15 @@ local function setupAttackButton()
 	
 	attackButton.MouseButton1Down:Connect(function()
 		if not currentTool then return end
-		isSpaceHeld = true
+		if isMousePressed then return end -- Prevent multiple loops
+		isMousePressed = true
 		heldAttackOverride = true
 		attackPressStartTime = tick()
 		if attackLoopConnection then
 			attackLoopConnection:Disconnect()
 		end
 		attackLoopConnection = game:GetService("RunService").Heartbeat:Connect(function()
-			if not isSpaceHeld or not currentTool then
+			if not isMousePressed or not currentTool then
 				return
 			end
 			if not humanoid or humanoid.Health <= 0 then
@@ -422,9 +342,10 @@ local function setupAttackButton()
 			end
 		end)
 	end)
-    
+
 	attackButton.MouseButton1Up:Connect(function()
-		isSpaceHeld = false
+		if not isMousePressed then return end
+		isMousePressed = false
 		heldAttackOverride = false
 		attackPressStartTime = 0
 		if attackLoopConnection then
@@ -435,35 +356,7 @@ local function setupAttackButton()
 	end)
 end
 
--- ========== RUN BUTTON SETUP ==========
-local function setupRunButton()
-	local playerGui = player:WaitForChild("PlayerGui")
-	local gameGui = playerGui:FindFirstChild("GameGui")
-	if not gameGui then return end
-	
-	local frame = gameGui:FindFirstChild("Frame")
-	if not frame then return end
-	
-	local runButton = frame:FindFirstChild("RunButton")
-	if not runButton then return end
-	
-	runButton.Visible = UserInputService.TouchEnabled
-	
-	runButton.MouseButton1Down:Connect(function()
-		if currentMana and currentMana.Value > 0 then
-			isSprinting = true
-		else
-			isSprinting = false
-		end
-	end)
-	
-	runButton.MouseButton1Up:Connect(function()
-		isSprinting = false
-		if humanoid then
-			humanoid.WalkSpeed = MOVE_SPEED
-		end
-	end)
-end
+
 
 -- ========== JUMP BUTTON SETUP ==========
 local function setupJumpButton()
@@ -483,53 +376,6 @@ local function setupJumpButton()
 		if humanoid then
 			humanoid.Jump = true
 		end
-		
-		-- Play weapon Jump animation if available
-		local tool = nil
-		for _, child in ipairs(character:GetChildren()) do
-			if child:IsA("Tool") then
-				tool = child
-				break
-			end
-		end
-		if tool and animator then
-			local jumpAnim = tool:FindFirstChild("Jump")
-			if jumpAnim and jumpAnim:IsA("Animation") then
-				-- Stop all current animations before playing jump
-				for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-					track:Stop()
-				end
-				currentAnimationTrack = animator:LoadAnimation(jumpAnim)
-				currentAnimationTrack.Looped = false
-				currentAnimationTrack:Play()
-				lastAnimationType = "Jump"
-				print("Playing jump animation")
-				-- After any non-looping animation finishes, restore idle if not attacking or moving
-				currentAnimationTrack.Stopped:Connect(function()
-					if not isAttacking and animator and tool then
-						local moveDirection = Vector3.new(0, 0, 0)
-						if keysPressed.D then moveDirection = moveDirection + Vector3.new(0, 0, -1) end
-						if keysPressed.A then moveDirection = moveDirection + Vector3.new(0, 0, 1) end
-						if thumbstickActive and thumbstickInput.Magnitude > 0 then
-							moveDirection = moveDirection + Vector3.new(0, 0, thumbstickInput.X)
-						end
-						if moveDirection.Magnitude == 0 then
-							local idleAnimation = tool:FindFirstChild("Idle")
-							if idleAnimation and idleAnimation:IsA("Animation") then
-								for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-									t:Stop()
-								end
-								local idleTrack = animator:LoadAnimation(idleAnimation)
-								idleTrack.Looped = true
-								idleTrack:Play()
-								currentAnimationTrack = idleTrack
-								lastAnimationType = "Idle"
-							end
-						end
-					end
-				end)
-			end
-		end
 	end)
 end
 
@@ -540,74 +386,19 @@ setupJumpButton()
 
 -- ========== INPUT HANDLING ==========
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-    
-	local keyCode = input.KeyCode
-	if keyCode == Enum.KeyCode.W then
-		humanoid.Jump = true
-		-- Play weapon Jump animation if available
-		local tool = nil
-		for _, child in ipairs(character:GetChildren()) do
-			if child:IsA("Tool") then
-				tool = child
-				break
-			end
-		end
-		if tool and animator then
-			local jumpAnim = tool:FindFirstChild("Jump")
-			if jumpAnim and jumpAnim:IsA("Animation") then
-				-- Stop all current animations before playing jump
-				for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-					track:Stop()
-				end
-				currentAnimationTrack = animator:LoadAnimation(jumpAnim)
-				currentAnimationTrack.Looped = false
-				currentAnimationTrack:Play()
-				lastAnimationType = "Jump"
-				print("Playing jump animation")
-				-- After any non-looping animation finishes, restore idle if not attacking or moving
-				currentAnimationTrack.Stopped:Connect(function()
-					if not isAttacking and animator and tool then
-						local moveDirection = Vector3.new(0, 0, 0)
-						if keysPressed.D then moveDirection = moveDirection + Vector3.new(0, 0, -1) end
-						if keysPressed.A then moveDirection = moveDirection + Vector3.new(0, 0, 1) end
-						if thumbstickActive and thumbstickInput.Magnitude > 0 then
-							moveDirection = moveDirection + Vector3.new(0, 0, thumbstickInput.X)
-						end
-						if moveDirection.Magnitude == 0 then
-							local idleAnimation = tool:FindFirstChild("Idle")
-							if idleAnimation and idleAnimation:IsA("Animation") then
-								for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-									t:Stop()
-								end
-								local idleTrack = animator:LoadAnimation(idleAnimation)
-								idleTrack.Looped = true
-								idleTrack:Play()
-								currentAnimationTrack = idleTrack
-								lastAnimationType = "Idle"
-							end
-						end
-					end
-				end)
-			end
-		end
-	elseif keyCode == Enum.KeyCode.D then
-		keysPressed.D = true
-	elseif keyCode == Enum.KeyCode.A then
-		keysPressed.A = true
-	elseif keyCode == Enum.KeyCode.Space then
-		if not currentTool then
-			return
-		end
-		isSpaceHeld = true
+-- Only enable M1 attack on non-touch devices
+if not isOnMobile then
+	local mouse = player:GetMouse()
+	mouse.Button1Down:Connect(function()
+		if not currentTool then return end
+		isMousePressed = true
 		heldAttackOverride = true
 		attackPressStartTime = tick()
 		if attackLoopConnection then
 			attackLoopConnection:Disconnect()
 		end
 		attackLoopConnection = game:GetService("RunService").Heartbeat:Connect(function()
-			if not isSpaceHeld or not currentTool then
+			if not isMousePressed or not currentTool then
 				return
 			end
 			if not humanoid or humanoid.Health <= 0 then
@@ -618,17 +409,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 				performAttack(currentTool)
 			end
 		end)
-	end
-end)
+	end)
 
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-	local keyCode = input.KeyCode
-	if keyCode == Enum.KeyCode.D then
-		keysPressed.D = false
-	elseif keyCode == Enum.KeyCode.A then
-		keysPressed.A = false
-	elseif keyCode == Enum.KeyCode.Space then
-		isSpaceHeld = false
+	mouse.Button1Up:Connect(function()
+		isMousePressed = false
 		heldAttackOverride = false
 		attackPressStartTime = 0
 		if attackLoopConnection then
@@ -636,44 +420,12 @@ UserInputService.InputEnded:Connect(function(input, gameProcessed)
 			attackLoopConnection = nil
 		end
 		-- Allow current animation to finish naturally
-	end
-end)
-
--- ========== MOBILE THUMBSTICK INPUT ==========
-if isOnMobile then
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if input.UserInputType == Enum.UserInputType.Touch then
-			if isTouchOnThumbstick(input.Position) and not currentTouchId then
-				if thumbstick then
-					thumbstick.thumbstickArea.Visible = true
-				end
-				currentTouchId = input
-				handleThumbstickInput(input, gameProcessed)
-			end
-		end
-	end)
-	
-	UserInputService.InputChanged:Connect(function(input, gameProcessed)
-		if input.UserInputType == Enum.UserInputType.Touch and currentTouchId == input then
-			handleThumbstickInput(input, gameProcessed)
-		end
-	end)
-	
-	UserInputService.InputEnded:Connect(function(input, gameProcessed)
-		if input.UserInputType == Enum.UserInputType.Touch and currentTouchId == input then
-			currentTouchId = nil
-			handleThumbstickRelease(input, gameProcessed)
-			
-			if hideThumbstickDebounce then
-				task.cancel(hideThumbstickDebounce)
-			end
-			hideThumbstickDebounce = task.delay(1.5, hideThumbstickArea)
-		end
 	end)
 end
 
 -- ========== SPRINT HANDLING ==========
-ContextActionService:BindActionAtPriority("DisableShiftLock", function(actionName, inputState, input)
+local lastSprintState = false
+ContextActionService:BindActionAtPriority("SprintAction", function(actionName, inputState, input)
 	if input.KeyCode == Enum.KeyCode.LeftShift then
 		if inputState == Enum.UserInputState.Begin then
 			if currentMana and currentMana.Value > 0 then
@@ -683,10 +435,14 @@ ContextActionService:BindActionAtPriority("DisableShiftLock", function(actionNam
 			end
 		elseif inputState == Enum.UserInputState.End then
 			isSprinting = false
-			if humanoid then
-				humanoid.WalkSpeed = MOVE_SPEED
-			end
 		end
+		
+		-- Fire running event when sprint state changes
+		if lastSprintState ~= isSprinting then
+			runningEvent:FireServer(isSprinting)
+			lastSprintState = isSprinting
+		end
+		
 		return Enum.ContextActionResult.Sink
 	end
 	return Enum.ContextActionResult.Pass
@@ -744,80 +500,7 @@ local function showTeleportFadeWithMap(mapName)
     textLabel.Text = ""
 end
 
--- ========== SPAWN POSITION LOCKING ========== 
-local lockedXPosition = nil
-local portalTeleportCooldown = 0 -- timestamp until which X constraint is disabled
-
-local function getCurrentSpawnPart()
-    local stats = player:FindFirstChild("Stats")
-    local mapName = "Grimleaf Entrance"
-    local spawnName = "SpawnLocation"
-    if stats then
-        local playerMapValue = stats:FindFirstChild("PlayerMap")
-        if playerMapValue and playerMapValue.Value ~= "" then
-            mapName = playerMapValue.Value
-        end
-        local lastSpawnValue = stats:FindFirstChild("LastSpawnName")
-        if lastSpawnValue and lastSpawnValue.Value ~= "" then
-            spawnName = lastSpawnValue.Value
-        end
-    end
-    local mapFolder = workspace:FindFirstChild("Maps")
-    if mapFolder then
-        local map = mapFolder:FindFirstChild(mapName)
-        if map then
-            return map:FindFirstChild(spawnName)
-        end
-    end
-    return nil
-end
-
-local function updateLockedXPosition()
-    local spawnPart = getCurrentSpawnPart()
-    if spawnPart then
-        lockedXPosition = spawnPart.Position.X
-    end
-end
-
--- Listen for spawn changes to update lockedXPosition
-local function connectSpawnListeners()
-    local stats = player:FindFirstChild("Stats")
-    if not stats then return end
-    local function onSpawnChanged()
-        updateLockedXPosition()
-    end
-    local lastSpawn = stats:FindFirstChild("LastSpawnName")
-    if lastSpawn then
-        lastSpawn:GetPropertyChangedSignal("Value"):Connect(onSpawnChanged)
-    end
-    local playerMap = stats:FindFirstChild("PlayerMap")
-    if playerMap then
-        playerMap:GetPropertyChangedSignal("Value"):Connect(onSpawnChanged)
-    end
-end
-
-connectSpawnListeners()
-
--- Listen for IsPortalTeleporting changes to add cooldown and show teleport fade
-player:GetAttributeChangedSignal("IsPortalTeleporting"):Connect(function()
-	if player:GetAttribute("IsPortalTeleporting") then
-		-- Get map name for typing effect
-		local stats = player:FindFirstChild("Stats")
-		local mapName = "Teleporting..."
-		if stats then
-			local playerMapValue = stats:FindFirstChild("PlayerMap")
-			if playerMapValue and playerMapValue.Value ~= "" then
-				mapName = playerMapValue.Value
-			end
-		end
-		showTeleportFadeWithMap(mapName)
-	elseif not player:GetAttribute("IsPortalTeleporting") then
-		portalTeleportCooldown = tick() -- 10 seconds after teleport ends
-		updateLockedXPosition() -- Update X lock to new map's spawn part
-	end
-end)
-
--- Show teleport fade on respawn as well
+-- Show teleport fade on respawn
 player.CharacterAdded:Connect(function(newCharacter)
     setupCharacter(newCharacter)
     -- Get map name for typing effect
@@ -833,129 +516,104 @@ player.CharacterAdded:Connect(function(newCharacter)
 end)
 
 -- ========== MAIN LOOP ==========
+local _prevHumanoidState = nil
 RunService.RenderStepped:Connect(function()
 	if not character or not humanoidRootPart or not humanoid then return end
-
-	if not lockedXPosition then
-		updateLockedXPosition()
-	end
-
-	local moveDirection = Vector3.new(0, 0, 0)
 	
-	if keysPressed.D then moveDirection = moveDirection + Vector3.new(0, 0, -1) end
-	if keysPressed.A then moveDirection = moveDirection + Vector3.new(0, 0, 1) end
-	
-	if thumbstickActive and thumbstickInput.Magnitude > 0 then
-		moveDirection = moveDirection + Vector3.new(0, 0, thumbstickInput.X)
-	end
-	
-	if isSprinting and currentMana and currentMana.Value <= 0 then
-		isSprinting = false
-	end
-	
-	if isSprinting and moveDirection.Magnitude > 0 then
-		humanoid.WalkSpeed = SPRINT_SPEED
-	else
-		humanoid.WalkSpeed = MOVE_SPEED
-	end
-	
-	runningEvent:FireServer(isSprinting and moveDirection.Magnitude > 0)
-	
-	if moveDirection.Magnitude > 0 then
-		local targetCFrame = CFrame.new(humanoidRootPart.Position, humanoidRootPart.Position + moveDirection)
-		humanoidRootPart.CFrame = humanoidRootPart.CFrame:Lerp(targetCFrame, 0.2)
-	end
-	
-	humanoid:Move(moveDirection, false)
-	
-	-- Handle walk/run animation (only if not attacking)
-	if animator and not isAttacking then
-		local isMoving = moveDirection.Magnitude > 0
-		local animationType = (humanoid.WalkSpeed >= SPRINT_SPEED) and "Run" or "Walk"
-		
-		local tool = nil
-		for _, child in ipairs(character:GetChildren()) do
-			if child:IsA("Tool") then
-				tool = child
-				break
-			end
+	-- Detect player movement state and play animations from tool
+	if animator and currentTool then
+		-- Only skip animation updates while actively attacking mid-animation
+		if isAttacking and isAnimationInProgress then
+			return
 		end
 		
-		if isMoving and tool then
-			-- Only switch animation if the type changed
-			if lastAnimationType ~= animationType then
-				local animation = tool:FindFirstChild(animationType)
-				if animation and animation:IsA("Animation") then
-					if currentAnimationTrack then
-						currentAnimationTrack:Stop()
+		local humanoidState = humanoid:GetState()
+		local isJumping = humanoidState == Enum.HumanoidStateType.Jumping or humanoidState == Enum.HumanoidStateType.FallingDown or humanoidState == Enum.HumanoidStateType.Freefall or humanoidState == Enum.HumanoidStateType.Flying
+		local isOnGround = humanoidState == Enum.HumanoidStateType.Running or humanoidState == Enum.HumanoidStateType.Landed or humanoidState == Enum.HumanoidStateType.Climbing or humanoidState == Enum.HumanoidStateType.Seated
+
+		if isJumping then
+			-- Play tool Jump animation if available and not already playing
+			if lastAnimationType ~= "Jump" or not (currentAnimationTrack and currentAnimationTrack.IsPlaying) then
+				print("[DEBUG] Player is airborne, attempting to play tool Jump animation.")
+				if currentAnimationTrack then
+					print("[DEBUG] Stopping current animation track.")
+					currentAnimationTrack:Stop()
+					currentAnimationTrack = nil
+				end
+				lastAnimationType = nil
+				local jumpAnimation = currentTool:FindFirstChild("Jump")
+				if jumpAnimation then
+					print("[DEBUG] Found Jump child in tool. ClassName:", jumpAnimation.ClassName)
+				else
+					print("[DEBUG] No Jump child found in tool.")
+				end
+				if jumpAnimation and jumpAnimation:IsA("Animation") then
+					if animator then
+						print("[DEBUG] Loading and playing Jump animation.")
+						currentAnimationTrack = animator:LoadAnimation(jumpAnimation)
+						currentAnimationTrack.Looped = true
+						currentAnimationTrack:Play()
+						lastAnimationType = "Jump"
+					else
+						print("[DEBUG] Animator not found!")
 					end
-					
-					currentAnimationTrack = animator:LoadAnimation(animation)
-					currentAnimationTrack.Looped = true
-					currentAnimationTrack:Play()
-					isWalking = true
-					lastAnimationType = animationType
+				else
+					print("[DEBUG] Jump child is not an Animation instance!")
 				end
 			end
-		elseif not isMoving then
-			-- Stop animation when not moving
-			if currentAnimationTrack then
+		elseif isOnGround then
+			-- Stop jump animation if playing
+			if lastAnimationType == "Jump" and currentAnimationTrack and currentAnimationTrack.IsPlaying then
+				print("[DEBUG] Player landed, stopping Jump animation.")
 				currentAnimationTrack:Stop()
 				currentAnimationTrack = nil
+				lastAnimationType = nil
 			end
-			isWalking = false
-			lastAnimationType = nil
 		end
-	end
-	
-
-	
-	local isTeleporting = player:GetAttribute("IsPortalTeleporting")
-	local now = tick()
-	if lockedXPosition and not isTeleporting and now > portalTeleportCooldown then
-		local currentPos = humanoidRootPart.Position
-		if math.abs(currentPos.X - lockedXPosition) > 0.01 then
-			humanoidRootPart.CFrame = CFrame.new(lockedXPosition, currentPos.Y, currentPos.Z) * (humanoidRootPart.CFrame - humanoidRootPart.CFrame.Position)
+		
+		-- Only check HORIZONTAL velocity for walk/run (ignore vertical velocity from jumping)
+		local horizontalVelocity = Vector3.new(humanoidRootPart.AssemblyLinearVelocity.X, 0, humanoidRootPart.AssemblyLinearVelocity.Z).Magnitude
+		
+		-- Use hysteresis: different thresholds for starting and stopping movement
+		local isMoving
+		if lastAnimationType == "Idle" then
+			-- Need more velocity to START moving from idle
+			isMoving = horizontalVelocity > MOVEMENT_START_THRESHOLD
+		else
+			-- Need less velocity to keep moving (prevents bouncing back to idle)
+			isMoving = horizontalVelocity > MOVEMENT_STOP_THRESHOLD
 		end
-		local currentVel = humanoidRootPart.AssemblyLinearVelocity
-		humanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, currentVel.Y, currentVel.Z)
+		
+		local animationType = nil
+		
+		if isMoving then
+			animationType = isSprinting and "Run" or "Walk"
+		else
+			animationType = "Idle"
+		end
+		
+		-- Only switch animation if enough time has passed since last change (debounce)
+		-- Prevent overriding jump animation while it's playing
+		local currentTime = tick()
+		if lastAnimationType == "Jump" then
+			if currentAnimationTrack and currentAnimationTrack.IsPlaying then
+				return
+			end
+		end
+		if lastAnimationType ~= animationType and (currentTime - lastAnimationChangeTime) >= ANIMATION_CHANGE_COOLDOWN then
+			local animation = currentTool:FindFirstChild(animationType)
+			if animation and animation:IsA("Animation") then
+				if currentAnimationTrack then
+					currentAnimationTrack:Stop()
+				end
+				currentAnimationTrack = animator:LoadAnimation(animation)
+				currentAnimationTrack.Looped = (animationType ~= "Jump")
+				currentAnimationTrack:Play()
+				lastAnimationType = animationType
+				lastAnimationChangeTime = currentTime
+			end
+		end
 	end
 end)
 
-local function shouldEnableThumbstick()
-    if not isOnMobile then return false end
-    local inventoryGui = playerGui:FindFirstChild("InventoryGui")
-    local characterGui = playerGui:FindFirstChild("CharacterGui")
-    if (inventoryGui and inventoryGui.Enabled) or (characterGui and characterGui.Enabled) then
-        return false
-    end
-    return true
-end
 
-local function updateThumbstickGui()
-    if thumbstickGui then
-        thumbstickGui.Enabled = shouldEnableThumbstick()
-    end
-end
-
--- Call once at startup
-updateThumbstickGui()
-
--- Listen for InventoryGui and CharacterGui visibility changes
-local function connectGuiVisibility(guiName)
-    local gui = playerGui:FindFirstChild(guiName)
-    if gui then
-        gui:GetPropertyChangedSignal("Enabled"):Connect(updateThumbstickGui)
-    end
-end
-
-connectGuiVisibility("InventoryGui")
-connectGuiVisibility("CharacterGui")
-
--- If you ever create InventoryGui or CharacterGui dynamically, you may want to listen for their addition:
-playerGui.ChildAdded:Connect(function(child)
-    if child.Name == "InventoryGui" or child.Name == "CharacterGui" then
-        connectGuiVisibility(child.Name)
-        updateThumbstickGui()
-    end
-end)

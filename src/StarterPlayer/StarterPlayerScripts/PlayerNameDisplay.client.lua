@@ -140,11 +140,7 @@ local function CreateNameDisplay(player, character)
 	-- Set text color based on admin type
 	if AdminId.IsAdmin(player.UserId) then
 		local adminType = AdminId.GetAdminType(player.UserId)
-		if adminType == "verified" then
-			textLabel.TextColor3 = Color3.fromRGB(255, 0, 0) -- Red color for verified
-		else
 			textLabel.TextColor3 = Color3.fromRGB(135, 206, 250) -- Light blue color for regular admins
-		end
 	else
 		textLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- White color for normal players
 	end
@@ -178,11 +174,7 @@ local function CreateNameDisplay(player, character)
 						-- Set text color based on admin type
 						if AdminId.IsAdmin(player.UserId) then
 							local adminType = AdminId.GetAdminType(player.UserId)
-							if adminType == "verified" then
-								textLabel.TextColor3 = Color3.fromRGB(255, 0, 0) -- Red color for verified
-							else
 								textLabel.TextColor3 = Color3.fromRGB(135, 206, 250) -- Light blue color for regular admins
-							end
 						else
 							textLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- White color for normal players
 						end

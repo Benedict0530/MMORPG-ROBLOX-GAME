@@ -21,7 +21,7 @@ local playerCollectCooldown = {}
 -- Track pending money to save periodically
 local pendingMoneySave = {}
 
-local COLLECT_DISTANCE = 50
+local COLLECT_DISTANCE = 10
 local COLLECT_COOLDOWN = 0.1
 
 -- Determine if an item is a coin or a drop
