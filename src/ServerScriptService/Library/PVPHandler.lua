@@ -82,6 +82,12 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 
 	for _, targetPlayer in ipairs(Players:GetPlayers()) do
 		if targetPlayer ~= attacker and targetPlayer.Character then
+			-- Prevent damage to NPCs - check IsNPC attribute
+			if targetPlayer.Character:GetAttribute("IsNPC") then
+				print("[PVPHandler][DEBUG] Target is an NPC (IsNPC attribute), blocking damage")
+				continue
+			end
+			
 			local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
 			-- Check distance, directional cone, AND raycast line-of-sight
 			if targetRoot and (targetRoot.Position - attackerPos).Magnitude <= radius and isTargetInAttackCone(charRoot, targetRoot) and raycastHitsTarget(charRoot, targetRoot, radius) then

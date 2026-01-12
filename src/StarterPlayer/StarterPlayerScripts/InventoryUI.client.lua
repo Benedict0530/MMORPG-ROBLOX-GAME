@@ -257,7 +257,7 @@ local function createInventoryItem(itemData, index)
 				local price = weaponStats.Price or 0
 				local descText = itemData.name .. "\n" ..
 					"Damage: " .. tostring(weaponStats.damage) .. "\n" ..
-					"LVL: " .. tostring(weaponStats.levelRequirement or "N/A") .. "\n" ..
+					"Level Requirement: " .. tostring(weaponStats.levelRequirement or "N/A") .. "\n" ..
 					(weaponStats.Description or "No description available") .. "\n" ..
 					"Price: $" .. formatNumberWithCommas(price)
 				statsDescription.Text = descText

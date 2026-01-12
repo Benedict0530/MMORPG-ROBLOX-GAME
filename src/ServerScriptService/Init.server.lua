@@ -145,6 +145,16 @@ else
 	error("[Init] Failed to load ItemActionHandler: " .. tostring(err))
 end
 
+local HealingCapsuleHandler
+success, err = pcall(function()
+	HealingCapsuleHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("HealingCapsuleHandler"))
+end)
+if success then
+
+else
+	error("[Init] Failed to load HealingCapsuleHandler: " .. tostring(err))
+end
+
 local PortalTeleportHandler
 success, err = pcall(function()
 	PortalTeleportHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("PortalHandler"))
@@ -153,6 +163,26 @@ if success then
 	PortalTeleportHandler.Init()
 else
 	error("[Init] Failed to load PortalTeleportHandler: " .. tostring(err))
+end
+
+local NPCManager
+success, err = pcall(function()
+	NPCManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("NPCManager"))
+end)
+if success then
+	print("[Init] ✅ NPCManager loaded")
+else
+	warn("[Init] ⚠️ Failed to load NPCManager: " .. tostring(err))
+end
+
+local NpcQuestHandler
+success, err = pcall(function()
+	NpcQuestHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("NpcQuestHandler"))
+end)
+if success then
+	print("[Init] ✅ NpcQuestHandler loaded")
+else
+	warn("[Init] ⚠️ Failed to load NpcQuestHandler: " .. tostring(err))
 end
 
 -- === COMBAT SYSTEMS ===

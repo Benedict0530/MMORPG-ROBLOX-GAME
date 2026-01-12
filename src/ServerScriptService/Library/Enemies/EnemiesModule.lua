@@ -11,7 +11,25 @@ local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitFo
 -- Load ItemDropManager for handling drops
 local ItemDropManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("ItemDropManager"))
 
+-- Load QuestDataStore for quest progress tracking
+local QuestDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("QuestDataStore"))
+
+-- Load UnifiedDataStoreManager for saving quest progress
+local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+
+-- Load NpcQuestData for quest objectives
+local NpcQuestData = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("NpcQuestData"))
+
 local SoundModule = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("SoundModule"))
+
+-- Create or get QuestComplete RemoteEvent for notifying client about quest completion
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local questCompleteEvent = ReplicatedStorage:FindFirstChild("QuestComplete")
+if not questCompleteEvent then
+	questCompleteEvent = Instance.new("RemoteEvent")
+	questCompleteEvent.Name = "QuestComplete"
+	questCompleteEvent.Parent = ReplicatedStorage
+end
 
 -- Add all Map folder parts to "Env" collision group once at startup
 local function initializeMapCollision()
@@ -187,28 +205,54 @@ function EnemiesManager.Start(model)
 	-- Create enemy health bar BillboardGui
 	local function createEnemyHealthBar(enemyModel, maxHealth)
 		if not head or not head.Parent then return end
-		
+
 		local billboard = Instance.new("BillboardGui")
-		billboard.Size = UDim2.new(2, 0, 0.5, 0)
-		billboard.StudsOffset = Vector3.new(0, 5, 0)
+		billboard.Size = UDim2.new(2, 0, 1, 0)
+		-- Adjust Y offset if 'giant' is in the enemy's name (case-insensitive)
+		local yOffset = 5
+		if string.find(string.lower(enemyModel.Name), "giant") then
+			yOffset = yOffset + 18
+			billboard.Size = UDim2.new(20, 0, 5, 0) -- Make billboard bigger
+		end
+		billboard.StudsOffset = Vector3.new(0, yOffset, 0)
 		billboard.MaxDistance = 100
 		billboard.Parent = head
+
+		-- Enemy name label on top (bigger)
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(1, 0, 0.4, 0)
+		nameLabel.Position = UDim2.new(0, 0, 0, 0)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		nameLabel.TextScaled = true
+		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.Text = enemyModel.Name
+		nameLabel.Parent = billboard
+		nameLabel.Name = "EnemyNameLabel"
 		
-		-- Background frame for health bar
+		-- Add UIStroke for text outline
+		local textStroke = Instance.new("UIStroke")
+		textStroke.Thickness = 2
+		textStroke.Color = Color3.fromRGB(0, 0, 0)
+		textStroke.Transparency = 0
+		textStroke.Parent = nameLabel
+
+		-- Background frame for health bar (below name)
 		local barBg = Instance.new("Frame")
-		barBg.Size = UDim2.new(1, 0, 1, 0)
+		barBg.Size = UDim2.new(1, 0, 0.6, 0)
+		barBg.Position = UDim2.new(0, 0, 0.4, 0)
 		barBg.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 		barBg.BackgroundTransparency = 0.5
 		barBg.BorderSizePixel = 1
 		barBg.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		barBg.Parent = billboard
 		barBg.Name = "HealthBarBG"
-		
+
 		-- Add corner to background
 		local bgCorner = Instance.new("UICorner")
 		bgCorner.CornerRadius = UDim.new(0, 10)
 		bgCorner.Parent = barBg
-		
+
 		-- Health bar fill
 		local healthBar = Instance.new("Frame")
 		healthBar.Size = UDim2.new(1, 0, 1, 0)
@@ -217,12 +261,12 @@ function EnemiesManager.Start(model)
 		healthBar.BorderSizePixel = 0
 		healthBar.Parent = barBg
 		healthBar.Name = "HealthBarFill"
-		
+
 		-- Add corner to health fill
 		local fillCorner = Instance.new("UICorner")
 		fillCorner.CornerRadius = UDim.new(0, 10)
 		fillCorner.Parent = healthBar
-		
+
 		return billboard, barBg
 	end
 
@@ -296,9 +340,6 @@ function EnemiesManager.Start(model)
 					currentHealthValue.Value = math.max(currentHealthValue.Value - actualDamage, 0)
 					lastDamagedByPlayer = player -- Track who damaged this enemy
 					
-					-- Track damage dealt by this player for experience distribution
-					playerDamage[userId] = (playerDamage[userId] or 0) + actualDamage
-					
 					hitCooldowns[userId] = tick()
 					
 					-- Show damage text on client (even if 0 damage, shows "-0") (false = enemy damage, red)
@@ -341,6 +382,7 @@ function EnemiesManager.Start(model)
 	-- Create enemy health bar
 	local healthBarBillboard = createEnemyHealthBar(slime, maxEnemyHealth)
 	local currentHealth = maxEnemyHealth
+	local lastRecordedHealth = maxEnemyHealth -- Track previous health for damage calculation (MUST be before Changed event)
 	
 	-- Create health value if it doesn't exist
 	local enemyHealth = slime:FindFirstChild("Health")
@@ -396,6 +438,15 @@ function EnemiesManager.Start(model)
 	enemyHealth.Changed:Connect(function(newHealth)
 		-- Ignore all health changes after enemy dies
 		if isDead then return end
+		
+		-- Track damage dealt by players (only when health decreases)
+		if newHealth < lastRecordedHealth and lastDamagedByPlayer then
+			local damageTaken = lastRecordedHealth - newHealth
+			local userId = lastDamagedByPlayer.UserId
+			playerDamage[userId] = (playerDamage[userId] or 0) + damageTaken
+			print("[EnemiesModule] 💥 Player", lastDamagedByPlayer.Name, "dealt", damageTaken, "damage to enemy | Total damage by player:", playerDamage[userId])
+		end
+		lastRecordedHealth = newHealth
 		
 		currentHealth = newHealth
 		updateEnemyHealthBar()
@@ -533,7 +584,7 @@ function EnemiesManager.Start(model)
 		-- Distribute experience to all players who dealt damage, proportional to their damage
 		if enemyExperience > 0 then
 			if totalDamage > 0 then
-				-- Normal case: distribute proportionally based on damage dealt
+				-- Distribute proportionally based on damage dealt to this enemy
 				for userId, damageDealt in pairs(playerDamage) do
 					local player = Players:GetPlayerByUserId(userId)
 					if player then
@@ -558,37 +609,101 @@ function EnemiesManager.Start(model)
 					end
 				end
 			else
-				-- Fallback: no damage tracked but players might be nearby, find nearest players and award them
-				print("[EnemiesModule] WARNING: No damage tracked for", enemyName, "! Finding nearby players...")
-				local nearbyPlayers = {}
-				for _, player in ipairs(Players:GetPlayers()) do
-					if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-						local playerRoot = player.Character.HumanoidRootPart
-						local distance = (playerRoot.Position - root.Position).Magnitude
-						if distance < 100 then -- Award XP to players within 100 studs
-							table.insert(nearbyPlayers, {player = player, distance = distance})
-						end
-					end
-				end
-				
-				-- Award XP equally to nearby players (or full amount if only one)
-				if #nearbyPlayers > 0 then
-					local xpPerPlayer = math.floor(enemyExperience / #nearbyPlayers)
-					xpPerPlayer = math.max(xpPerPlayer, 1)
+				-- No damage tracked - don't award XP to anyone
+				print("[EnemiesModule] WARNING: No damage tracked for", enemyName, "! No XP awarded.")
+			end
+		end
+		
+		-- ====== QUEST PROGRESS TRACKING ======
+		-- Update quest progress for players who dealt damage to this enemy
+		if totalDamage > 0 then
+			for userId, damageDealt in pairs(playerDamage) do
+				local player = Players:GetPlayerByUserId(userId)
+				if player then
+					-- Get the enemy type/name to find matching quests
+					local enemyType = slime.Name -- e.g., "Gloop", "Spider", etc.
+					local matchingQuests = QuestDataStore.GetQuestsByEnemyType(enemyType)
 					
-					for _, entry in ipairs(nearbyPlayers) do
-						local player = entry.player
-						local stats = player:FindFirstChild("Stats")
-						if stats then
-							local experienceValue = stats:FindFirstChild("Experience")
-							if experienceValue then
-								experienceValue.Value = experienceValue.Value + xpPerPlayer
-								print("[EnemiesModule] Awarded", xpPerPlayer, "XP to nearby player", player.Name, "(distance:", math.floor(entry.distance), "studs)")
+					if #matchingQuests > 0 then
+						-- Check quests for this player
+						local questsFolder = player:FindFirstChild("Quests")
+						if questsFolder then
+							for _, questId in ipairs(matchingQuests) do
+								local questFolder = questsFolder:FindFirstChild("Quest_" .. questId)
+								if questFolder then
+									-- Check if quest is accepted
+									local statusValue = questFolder:FindFirstChild("status")
+									if statusValue and statusValue.Value == "accepted" then
+										-- Increment progress for this quest
+										local progressValue = questFolder:FindFirstChild("progress")
+										if progressValue then
+											-- Get the quest data to find the target
+											local questData = NpcQuestData.GetQuest(questId)
+											local targetAmount = questData and questData.objectives and questData.objectives[1] and questData.objectives[1].target or 10
+											
+											-- Only increment if we haven't reached the target yet
+											if progressValue.Value < targetAmount then
+												progressValue.Value = progressValue.Value + 1
+												print("[EnemiesModule] 📊 Quest", questId, "progress updated for", player.Name, "| Progress:", progressValue.Value, "/", targetAmount, "| Enemy:", enemyType)
+												
+												-- Check if quest objective is now complete
+												if progressValue.Value >= targetAmount then
+													-- Mark quest as completed
+													statusValue.Value = "completed"
+													print("[EnemiesModule] ✅ Quest", questId, "COMPLETED for", player.Name, "!")												
+												-- Get quest data for rewards
+												local questData = NpcQuestData.GetQuest(questId)
+												if questData and questData.rewards then
+													-- Award experience
+													if questData.rewards.experience and questData.rewards.experience > 0 then
+														local stats = player:FindFirstChild("Stats")
+														if stats then
+															local experienceValue = stats:FindFirstChild("Experience")
+															if experienceValue then
+																experienceValue.Value = experienceValue.Value + questData.rewards.experience
+																print("[EnemiesModule] 🎉 Awarded", questData.rewards.experience, "XP for quest completion to", player.Name)
+															end
+														end
+													end
+													
+													-- Award gold/coins (use "Money" stat, not "Coins")
+													if questData.rewards.gold and questData.rewards.gold > 0 then
+														local stats = player:FindFirstChild("Stats")
+														if stats then
+															local moneyValue = stats:FindFirstChild("Money")
+															if moneyValue then
+																moneyValue.Value = moneyValue.Value + questData.rewards.gold
+																print("[EnemiesModule] 🎉 Awarded", questData.rewards.gold, "Gold for quest completion to", player.Name)
+															end
+														end
+													end
+													
+													-- Notify client about quest completion with rewards
+													questCompleteEvent:FireClient(player, questData.questName, questData.rewards.experience, questData.rewards.gold)
+													print("[EnemiesModule] 📤 Sent quest completion notification to", player.Name)
+												end
+											end
+										else
+											print("[EnemiesModule] ⚠️ Quest", questId, "already at target (", progressValue.Value, "/", targetAmount, ") for", player.Name)
+										end
+										
+										-- Save quest progress to DataStore immediately
+										UnifiedDataStoreManager.SaveQuestData(player, true)
+										print("[EnemiesModule] 💾 Quest progress saved for", player.Name)
+										
+										-- Save player experience to DataStore (using proper LevelData save)
+										UnifiedDataStoreManager.SaveLevelData(player, true)
+										print("[EnemiesModule] 💾 Player experience saved to DataStore for", player.Name)
+										
+										-- Save player money to DataStore (using proper Money save)
+										UnifiedDataStoreManager.SaveMoney(player, true)
+										print("[EnemiesModule] 💾 Player money saved to DataStore for", player.Name)
+										end
+									end
+								end
 							end
 						end
 					end
-				else
-					print("[EnemiesModule] WARNING: No nearby players found for", enemyName, "!")
 				end
 			end
 		end
@@ -702,7 +817,8 @@ function EnemiesManager.Start(model)
 	SoundModule.playSoundInRange("DiedAudio", root.Position, "SFX", 100, false, 1)
 	task.wait(0.5)
 	slime:Destroy()
-	task.wait(15)
+			local spawnDelay = (enemyStats and enemyStats.SpawnDelay) or 15
+			task.wait(spawnDelay)
 			local template = ServerStorage:WaitForChild("Enemies"):FindFirstChild(enemyName)
 			if template then
 				local newSlime = template:Clone()

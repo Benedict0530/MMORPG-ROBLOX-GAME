@@ -39,6 +39,18 @@ local portals = {
 		spawnName = "PrevSpawn" -- Adjust as needed for Grimleaf Exit
 	},
 	{
+		fromMap = "Grimleaf Exit",
+		portalPath = {"NextPortal", "HitPart"},
+		toMap = "Frozen Realm",
+		spawnName = "NextSpawn" -- Adjust as needed for Grimleaf Exit
+	},
+	{
+		fromMap = "Frozen Realm",
+		portalPath = {"PrevPortal", "HitPart"},
+		toMap = "Grimleaf Exit",
+		spawnName = "PrevSpawn" -- Adjust as needed for Grimleaf Exit
+	},
+	{
 		fromMap = "Grimleaf 1",
 		portalPath = {"PVPPortal", "HitPart"},
 		toMap = "PVP Area",

@@ -58,7 +58,13 @@ function CameraFocusModule.FocusOn(modelOrPart, duration)
     -- Disable player movement
     disableMovement()
 
-    local newCFrame = targetPart.CFrame
+    -- Calculate camera position in front of the model looking at it
+    local cameraDistance = 8 -- Distance from the model
+    local cameraOffset = Vector3.new(0, 2, 0) -- Slight height offset
+    local newCFrame = CFrame.new(
+        targetPart.Position + targetPart.CFrame.LookVector * cameraDistance + cameraOffset,
+        targetPart.Position + cameraOffset
+    )
     local tweenInfo = TweenInfo.new(duration or 1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     activeTween = TweenService:Create(camera, tweenInfo, {CFrame = newCFrame})
     activeTween:Play()
@@ -70,8 +76,10 @@ end
 
 function CameraFocusModule.RestoreDefault()
     local camera = workspace.CurrentCamera
-    if not camera then
-        warn("Camera not found!")
+    local player = Players.LocalPlayer
+    
+    if not camera or not player then
+        warn("Camera or player not found!")
         return
     end
 
@@ -87,27 +95,14 @@ function CameraFocusModule.RestoreDefault()
         followConnection = nil
     end
 
-    -- Set to isometric follow view
-    local player = Players.LocalPlayer
-    local character = player and player.Character
-    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        camera.CameraType = Enum.CameraType.Scriptable
-        local defaultOffset = Vector3.new(25, 28, -30)
-        camera.FieldOfView = 35
-
-        local function updateCamera()
-            if rootPart and rootPart.Parent then
-                camera.CFrame = CFrame.new(rootPart.Position + defaultOffset, rootPart.Position)
-            end
-        end
-
-        -- Initial update
-        updateCamera()
-        -- Continuously update the camera to follow the player
-        followConnection = RunService.RenderStepped:Connect(updateCamera)
-    else
-        warn("Character or HumanoidRootPart not found, cannot set isometric view.")
+    -- Restore to default third-person camera
+    local character = player.Character
+    local humanoid = character and character:FindFirstChild("Humanoid")
+    
+    if humanoid then
+        camera.CameraType = Enum.CameraType.Follow
+        camera.CameraSubject = humanoid
+        camera.FieldOfView = 70
     end
 
     -- Re-enable movement

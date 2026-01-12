@@ -32,7 +32,7 @@ local function createAdminChat()
 	-- Main panel
 	local mainPanel = Instance.new("Frame")
 	mainPanel.Name = "MainPanel"
-	mainPanel.Size = UDim2.new(0, 450, 0, 320)
+	mainPanel.Size = UDim2.new(0, 300, 0, 200)
 	mainPanel.Position = UDim2.new(0.5, -225, 0, 20)
 	mainPanel.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 	mainPanel.BorderSizePixel = 0
@@ -60,6 +60,32 @@ local function createAdminChat()
 	local titleCorner = Instance.new("UICorner")
 	titleCorner.CornerRadius = UDim.new(0, 10)
 	titleCorner.Parent = titleBar
+	
+	-- Drag functionality for panel movement
+	local dragging = false
+	local dragOffset = Vector2.new(0, 0)
+	local mouse = Players.LocalPlayer:GetMouse()
+	
+	titleBar.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragOffset = Vector2.new(mouse.X, mouse.Y) - mainPanel.AbsolutePosition
+		end
+	end)
+	
+	titleBar.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+		end
+	end)
+	
+	mouse.Move:Connect(function()
+		if dragging then
+			local newPos = Vector2.new(mouse.X, mouse.Y) - dragOffset
+			mainPanel.Position = UDim2.new(0, newPos.X, 0, newPos.Y)
+		end
+	end)
 	
 	-- Close button
 	local closeBtn = Instance.new("TextButton")
@@ -464,6 +490,11 @@ function parseCommand(message, outputFunc)
         
 		if levelAmount < 1 then
 			outputFunc("❌ Level amount must be at least 1", Color3.fromRGB(255, 100, 100))
+			return
+		end
+		
+		if levelAmount > 100 then
+			outputFunc("❌ Max level amount is 100", Color3.fromRGB(255, 100, 100))
 			return
 		end
         

@@ -21,6 +21,19 @@ local createdBillboards = {}
 
 print("[PlayerNameDisplay.client] Client script started")
 
+-- Function to format numbers with commas (e.g., 1000 -> "1,000")
+local function FormatNumberWithCommas(num)
+	local formatted = tostring(num)
+	if tonumber(num) >= 1000 then
+		formatted = formatted:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+		-- Remove leading comma if exists
+		if formatted:sub(1, 1) == "," then
+			formatted = formatted:sub(2)
+		end
+	end
+	return formatted
+end
+
 -- Get the template frame from ReplicatedStorage
 local function GetNameTagTemplate()
 	local template = ReplicatedStorage:FindFirstChild("NameTagTemplate")
@@ -130,7 +143,7 @@ local function CreateNameDisplay(player, character)
 		if stats then
 			local level = stats:FindFirstChild("Level")
 			if level then
-				displayText = "Lvl " .. tostring(level.Value) .. ". " .. displayText
+				displayText = "Lvl " .. FormatNumberWithCommas(level.Value) .. ". " .. displayText
 			end
 		end
 	end
@@ -152,7 +165,7 @@ local function CreateNameDisplay(player, character)
 		if stats then
 			local level = stats:FindFirstChild("Level")
 			if level then
-				local function onLevelChanged()
+				local function UpdateLevelDisplay()
 					if textLabel and textLabel.Parent then
 						-- Rebuild display text with level update
 						local updatedText = player.DisplayName
@@ -167,8 +180,8 @@ local function CreateNameDisplay(player, character)
 							end
 						end
 						
-						-- Add level
-						updatedText = "Lvl " .. tostring(level.Value) .. ". " .. updatedText
+						-- Add level with comma formatting
+						updatedText = "Lvl " .. FormatNumberWithCommas(level.Value) .. ". " .. updatedText
 						textLabel.Text = updatedText
 						
 						-- Set text color based on admin type
@@ -180,7 +193,17 @@ local function CreateNameDisplay(player, character)
 						end
 					end
 				end
-				level.Changed:Connect(onLevelChanged)
+				
+				-- Connect to level changes for immediate update
+				level.Changed:Connect(UpdateLevelDisplay)
+				
+				-- Periodic refresh every 30 seconds for memory efficiency
+				task.spawn(function()
+					while textLabel and textLabel.Parent and character and character.Parent do
+						task.wait(30)
+						UpdateLevelDisplay()
+					end
+				end)
 			end
 		end
 	end
@@ -238,6 +261,27 @@ local function Initialize()
 	end)
 	
 	print("[PlayerNameDisplay.client] ✓ Initialized custom player name displays")
+	
+	-- Refresh nearby players' name displays every 5 seconds
+	-- This ensures players who weren't visible initially get their name tags
+	task.spawn(function()
+		while true do
+			task.wait(5)
+			
+			-- Check all players and ensure they have name displays
+			for _, player in ipairs(Players:GetPlayers()) do
+				if player and player.Character then
+					local humanoidRootPart = player.Character:FindFirstChild("HumanoidRootPart")
+					
+					-- If player has no name billboard, create one
+					if humanoidRootPart and not humanoidRootPart:FindFirstChild("NameBillboard") then
+						print("[PlayerNameDisplay.client] 🔄 Refreshing name display for:", player.Name)
+						CreateNameDisplay(player, player.Character)
+					end
+				end
+			end
+		end
+	end)
 end
 
 -- Wait for LocalPlayer to load

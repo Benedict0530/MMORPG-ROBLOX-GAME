@@ -29,7 +29,52 @@ local DEFAULT_ENEMY_STATS = {
             { itemName = "Plastic Sword", chance = 0.02 },        
             { itemName = "Iron Sword", chance = 0.01 }
         }
-    }
+    },
+    ["Ice Gloop Crusher"] = {
+        Health = 300,
+        Attack = 25,
+        Experience = 10,
+        Money = 10,
+        Drops = {
+            { itemName = "Plastic Sword", chance = 0.1 },  -- 10% chance to drop Plastic Sword
+            { itemName = "Iron Sword", chance = 0.05 }
+        }
+    },
+    ["Giant Gloop Crusher"] = {
+        Health = 1000,
+        Attack = 50,
+        Experience = 100,
+        Money = 100,
+        SpawnDelay = 600, -- 10 minutes
+        Drops = {
+            { itemName = "Grimleaf Sword", chance = 0.01 },  -- 1% chance to drop Grimleaf Sword
+            { itemName = "Iron Sword", chance = 0.5 },
+            { itemName = "Wooden Sword", chance = 1},
+        }
+    },
+    ["Red Giant Gloop Crusher"] = {
+        Health = 2000,
+        Attack = 100,
+        Experience = 200,
+        Money = 200,
+        SpawnDelay = 600, -- 10 minutes
+        Drops = {
+            { itemName = "Grimleaf Sword", chance = 0.5 },  -- 5% chance to drop Grimleaf Sword
+            { itemName = "Iron Sword", chance = 0.75 },
+            { itemName = "Plastic Sword", chance = 1},
+        }
+    },
+    ["Ice Giant Gloop Crusher"] = {
+        Health = 3000,
+        Attack = 150,
+        Experience = 300,
+        Money = 300,
+        SpawnDelay = 600, -- 10 minutes
+        Drops = {
+            { itemName = "Grimleaf Sword", chance = 0.75 },  -- 7.5% chance to drop Grimleaf Sword
+            { itemName = "Iron Sword", chance = 1 },
+        }
+    },
     -- Add more enemies here
 }
 

@@ -55,6 +55,10 @@ local heldAttackOverride = false -- If true, weapon speed is forced to 2
 local attackPressStartTime = 0
 local ATTACK_HOLD_THRESHOLD = 0.2 -- seconds to consider as 'held'
 
+-- ========== SPRINT SETTINGS ==========
+local DEFAULT_WALK_SPEED = 16
+local SPRINT_WALK_SPEED = 40
+
 -- ========== MOBILE SETUP ==========
 local isOnMobile = UserInputService.TouchEnabled
 local playerGui = player:WaitForChild("PlayerGui")
@@ -290,15 +294,18 @@ local function setupRunButton()
 	runButton.MouseButton1Down:Connect(function()
 		if currentMana and currentMana.Value > 0 then
 			isSprinting = true
+			if humanoid then humanoid.WalkSpeed = SPRINT_WALK_SPEED end
 			runningEvent:FireServer(true)
 		else
 			isSprinting = false
+			if humanoid then humanoid.WalkSpeed = DEFAULT_WALK_SPEED end
 			runningEvent:FireServer(false)
 		end
 	end)
 	
 	runButton.MouseButton1Up:Connect(function()
 		isSprinting = false
+		if humanoid then humanoid.WalkSpeed = DEFAULT_WALK_SPEED end
 		runningEvent:FireServer(false)
 	end)
 end
@@ -430,11 +437,14 @@ ContextActionService:BindActionAtPriority("SprintAction", function(actionName, i
 		if inputState == Enum.UserInputState.Begin then
 			if currentMana and currentMana.Value > 0 then
 				isSprinting = true
+                if humanoid then humanoid.WalkSpeed = SPRINT_WALK_SPEED end
 			else
 				isSprinting = false
+                if humanoid then humanoid.WalkSpeed = DEFAULT_WALK_SPEED end
 			end
 		elseif inputState == Enum.UserInputState.End then
 			isSprinting = false
+            if humanoid then humanoid.WalkSpeed = DEFAULT_WALK_SPEED end
 		end
 		
 		-- Fire running event when sprint state changes
@@ -447,6 +457,18 @@ ContextActionService:BindActionAtPriority("SprintAction", function(actionName, i
 	end
 	return Enum.ContextActionResult.Pass
 end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.LeftShift)
+
+-- Monitor mana while sprinting - stop sprint if mana runs out
+if currentMana then
+	currentMana:GetPropertyChangedSignal("Value"):Connect(function()
+		if isSprinting and currentMana.Value <= 0 then
+			isSprinting = false
+			if humanoid then humanoid.WalkSpeed = DEFAULT_WALK_SPEED end
+			runningEvent:FireServer(false)
+			lastSprintState = false
+		end
+	end)
+end
 
 -- ========== TELEPORT GUI FADE ========== 
 local function showTeleportFade()
@@ -522,78 +544,49 @@ RunService.RenderStepped:Connect(function()
 	
 	-- Detect player movement state and play animations from tool
 	if animator and currentTool then
-		-- Only skip animation updates while actively attacking mid-animation
 		if isAttacking and isAnimationInProgress then
 			return
 		end
-		
+
 		local humanoidState = humanoid:GetState()
 		local isJumping = humanoidState == Enum.HumanoidStateType.Jumping or humanoidState == Enum.HumanoidStateType.FallingDown or humanoidState == Enum.HumanoidStateType.Freefall or humanoidState == Enum.HumanoidStateType.Flying
-		local isOnGround = humanoidState == Enum.HumanoidStateType.Running or humanoidState == Enum.HumanoidStateType.Landed or humanoidState == Enum.HumanoidStateType.Climbing or humanoidState == Enum.HumanoidStateType.Seated
+		local isOnGround = humanoidState == Enum.HumanoidStateType.Running or humanoidState == Enum.HumanoidStateType.Landed or humanoidState == Enum.HumanoidStateType.Climbing or isSeated
 
 		if isJumping then
-			-- Play tool Jump animation if available and not already playing
 			if lastAnimationType ~= "Jump" or not (currentAnimationTrack and currentAnimationTrack.IsPlaying) then
-				print("[DEBUG] Player is airborne, attempting to play tool Jump animation.")
-				if currentAnimationTrack then
-					print("[DEBUG] Stopping current animation track.")
-					currentAnimationTrack:Stop()
-					currentAnimationTrack = nil
-				end
+				if currentAnimationTrack then currentAnimationTrack:Stop() currentAnimationTrack = nil end
 				lastAnimationType = nil
 				local jumpAnimation = currentTool:FindFirstChild("Jump")
-				if jumpAnimation then
-					print("[DEBUG] Found Jump child in tool. ClassName:", jumpAnimation.ClassName)
-				else
-					print("[DEBUG] No Jump child found in tool.")
-				end
-				if jumpAnimation and jumpAnimation:IsA("Animation") then
-					if animator then
-						print("[DEBUG] Loading and playing Jump animation.")
-						currentAnimationTrack = animator:LoadAnimation(jumpAnimation)
-						currentAnimationTrack.Looped = true
-						currentAnimationTrack:Play()
-						lastAnimationType = "Jump"
-					else
-						print("[DEBUG] Animator not found!")
-					end
-				else
-					print("[DEBUG] Jump child is not an Animation instance!")
+				if jumpAnimation and jumpAnimation:IsA("Animation") and animator then
+					currentAnimationTrack = animator:LoadAnimation(jumpAnimation)
+					currentAnimationTrack.Looped = true
+					currentAnimationTrack:Play()
+					lastAnimationType = "Jump"
 				end
 			end
 		elseif isOnGround then
-			-- Stop jump animation if playing
 			if lastAnimationType == "Jump" and currentAnimationTrack and currentAnimationTrack.IsPlaying then
-				print("[DEBUG] Player landed, stopping Jump animation.")
 				currentAnimationTrack:Stop()
 				currentAnimationTrack = nil
 				lastAnimationType = nil
 			end
 		end
-		
-		-- Only check HORIZONTAL velocity for walk/run (ignore vertical velocity from jumping)
+
 		local horizontalVelocity = Vector3.new(humanoidRootPart.AssemblyLinearVelocity.X, 0, humanoidRootPart.AssemblyLinearVelocity.Z).Magnitude
-		
-		-- Use hysteresis: different thresholds for starting and stopping movement
 		local isMoving
 		if lastAnimationType == "Idle" then
-			-- Need more velocity to START moving from idle
 			isMoving = horizontalVelocity > MOVEMENT_START_THRESHOLD
 		else
-			-- Need less velocity to keep moving (prevents bouncing back to idle)
 			isMoving = horizontalVelocity > MOVEMENT_STOP_THRESHOLD
 		end
-		
+
 		local animationType = nil
-		
 		if isMoving then
 			animationType = isSprinting and "Run" or "Walk"
 		else
 			animationType = "Idle"
 		end
-		
-		-- Only switch animation if enough time has passed since last change (debounce)
-		-- Prevent overriding jump animation while it's playing
+
 		local currentTime = tick()
 		if lastAnimationType == "Jump" then
 			if currentAnimationTrack and currentAnimationTrack.IsPlaying then
@@ -603,9 +596,7 @@ RunService.RenderStepped:Connect(function()
 		if lastAnimationType ~= animationType and (currentTime - lastAnimationChangeTime) >= ANIMATION_CHANGE_COOLDOWN then
 			local animation = currentTool:FindFirstChild(animationType)
 			if animation and animation:IsA("Animation") then
-				if currentAnimationTrack then
-					currentAnimationTrack:Stop()
-				end
+				if currentAnimationTrack then currentAnimationTrack:Stop() end
 				currentAnimationTrack = animator:LoadAnimation(animation)
 				currentAnimationTrack.Looped = (animationType ~= "Jump")
 				currentAnimationTrack:Play()

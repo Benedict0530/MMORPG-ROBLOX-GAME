@@ -14,6 +14,10 @@ local dropDebounce = {}
 -- Global per-player action lock to prevent concurrent actions
 local playerActionLock = {}
 
+-- Per-player cooldown to prevent rapid successive actions
+local playerActionCooldown = {}
+local ACTION_COOLDOWN = 0.2 -- 200ms cooldown between actions
+
 -- Listen for client requests to equip/drop items
 local itemActionEvent = ReplicatedStorage:FindFirstChild("ItemActionEvent")
 if not itemActionEvent then
@@ -22,9 +26,23 @@ if not itemActionEvent then
 	itemActionEvent.Parent = ReplicatedStorage
 end
 
+-- Create feedback event for client-side notifications
+local itemFeedbackEvent = ReplicatedStorage:FindFirstChild("ItemFeedbackEvent")
+if not itemFeedbackEvent then
+	itemFeedbackEvent = Instance.new("RemoteEvent")
+	itemFeedbackEvent.Name = "ItemFeedbackEvent"
+	itemFeedbackEvent.Parent = ReplicatedStorage
+end
+
 
 
 function ItemActionHandler:EquipItem(player, itemId)
+	-- Check global cooldown to prevent spam
+	if playerActionCooldown[player] and tick() - playerActionCooldown[player] < ACTION_COOLDOWN then
+		return
+	end
+	playerActionCooldown[player] = tick()
+	
 	-- Block if another action is ongoing for this player
 	if playerActionLock[player] then
 		warn("[ItemActionHandler] Action already in progress for", player.Name, "- blocking EquipItem")
@@ -63,6 +81,14 @@ function ItemActionHandler:EquipItem(player, itemId)
 	end
 	if playerLevel < requiredLevel then
 		warn("[ItemActionHandler] Player ", player.Name, " does not meet level requirement for ", item.name, ": required=", requiredLevel, ", player=", playerLevel)
+		print("[ItemActionHandler] Firing feedback event to player:", player.Name)
+		-- Send feedback to client about level requirement
+		itemFeedbackEvent:FireClient(player, "LevelRequirementNotMet", {
+			itemName = item.name,
+			requiredLevel = requiredLevel,
+			playerLevel = playerLevel
+		})
+		print("[ItemActionHandler] Feedback event fired successfully")
 		equipDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
 		return
@@ -88,6 +114,12 @@ end
 
 
 function ItemActionHandler:DropItem(player, itemId)
+	-- Check global cooldown to prevent spam
+	if playerActionCooldown[player] and tick() - playerActionCooldown[player] < ACTION_COOLDOWN then
+		return
+	end
+	playerActionCooldown[player] = tick()
+	
 	-- Block if another action is ongoing for this player
 	if playerActionLock[player] then
 		warn("[ItemActionHandler] Action already in progress for", player.Name, "- blocking DropItem")

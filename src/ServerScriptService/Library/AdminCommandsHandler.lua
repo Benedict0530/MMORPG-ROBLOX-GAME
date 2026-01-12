@@ -89,10 +89,10 @@ local function addLevels(adminPlayer, targetPlayer, levelAmount)
 
 	print("[AdminCommands] " .. adminPlayer.Name .. " added " .. levelAmount .. " levels to " .. targetPlayer.Name .. " (Now level " .. newLevel .. ", +"..(levelAmount * 3).." stat points)")
 
-	-- Save to datastore
+	-- Save to datastore with forced save (use normal save, let throttling handle it)
 	local ServerScriptService = game:GetService("ServerScriptService")
 	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-	UnifiedDataStoreManager.SaveLevelData(targetPlayer, true)
+	UnifiedDataStoreManager.SaveLevelData(targetPlayer, false)  -- Changed from true to false to respect throttling
 end
 
 -- Kick player (admin only)
@@ -152,7 +152,7 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 			-- Save to datastore
 			local ServerScriptService = game:GetService("ServerScriptService")
 			local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-			UnifiedDataStoreManager.SaveLevelData(targetPlayer, true)
+			UnifiedDataStoreManager.SaveLevelData(targetPlayer, false)  -- Changed from true to false to respect throttling
 		end
 		return
 	end

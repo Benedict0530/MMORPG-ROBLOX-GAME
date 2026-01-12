@@ -29,6 +29,52 @@ local blockSwingEvent = {}
 -- Expose for InventoryManager to use
 WeaponManager.blockSwingEvent = blockSwingEvent
 
+-- Helper function to check if target is in front of or beside the attacker
+-- Uses a 120-degree cone (front + sides)
+local function isTargetInAttackCone(attackerRoot, targetRoot)
+	local attackDirection = attackerRoot.CFrame.LookVector  -- Forward direction of attacker
+	local directionToTarget = (targetRoot.Position - attackerRoot.Position).Unit
+	
+	-- Dot product: if >= 0.5, target is within ~60 degrees on either side (120 degree total cone)
+	local dotProduct = attackDirection:Dot(directionToTarget)
+	return dotProduct >= 0.5  -- Approximately 60 degrees from center
+end
+
+-- Helper function to cast a ray and check if it hits the target
+local function raycastHitsTarget(attackerRoot, targetRoot, maxDistance)
+	local rayOrigin = attackerRoot.Position
+	local rayDirection = (targetRoot.Position - rayOrigin)
+	local rayDistance = rayDirection.Magnitude
+	
+	-- Don't raycast if target is beyond max distance
+	if rayDistance > maxDistance then
+		return false
+	end
+	
+	-- Create raycast params, ignoring the attacker and target themselves
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+	raycastParams.FilterDescendantsInstances = {attackerRoot.Parent, targetRoot.Parent}
+	
+	-- Cast ray towards target
+	local rayResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+	
+	-- If ray hit something, check if it's the target
+	if rayResult then
+		local hitPart = rayResult.Instance
+		-- Check if hit part belongs to target enemy
+		if hitPart:IsDescendantOf(targetRoot.Parent) then
+			return true
+		else
+			-- Ray hit something else (obstacle) before target
+			return false
+		end
+	else
+		-- Ray didn't hit anything, direct line of sight to target
+		return true
+	end
+end
+
 -- Helper: Get or create Health IntValue for enemy
 local function getOrCreateEnemyHealth(enemyModel, enemyStats)
 	local enemyHealth = enemyModel:FindFirstChild("Health")
@@ -107,17 +153,20 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 			if Players:GetPlayerFromCharacter(enemyModel) then
 				return -- skip player models
 			end
+			-- Prevent damage to NPCs
+			if enemyModel:GetAttribute("IsNPC") then
+				return -- skip NPCs
+			end
 			if deadEnemies[enemyModel] or hitEnemies[enemyModel] then return end
 
 			local charRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 			local enemyRoot = enemyModel:FindFirstChild("HumanoidRootPart") or enemyModel.PrimaryPart
             
-			if charRoot and enemyRoot then
-				local toEnemy = (enemyRoot.Position - charRoot.Position).Unit
-				local forward = charRoot.CFrame.LookVector.Unit
-				local dot = forward:Dot(toEnemy)
-				local angle = math.acos(dot)
-				if angle > math.rad(45) then return end
+		if not charRoot or not enemyRoot then return end
+		
+		-- Check directional cone (120-degree) and raycast line-of-sight
+		if not (isTargetInAttackCone(charRoot, enemyRoot) and raycastHitsTarget(charRoot, enemyRoot, 50)) then
+			return
 			end
 
 			hitEnemies[enemyModel] = true

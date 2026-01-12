@@ -22,6 +22,7 @@ local CONFIG = {
 local lastSaveTime = {} -- Maps userId -> last save timestamp
 local pendingChanges = {} -- Maps userId -> {type -> data}
 local isSaving = {} -- Maps userId -> whether currently saving
+local saveCooldowns = {} -- Maps userId -> next allowed save time (with cooldown)
 
 -- Initialize pending changes tracking
 local function initPlayerTracking(userId)
@@ -41,6 +42,12 @@ end
 -- Check if enough time has passed for a save
 local function canSaveNow(userId)
 	local now = tick()
+	
+	-- Check hard cooldown (prevent DataStore spam)
+	if saveCooldowns[userId] and now < saveCooldowns[userId] then
+		return false -- Still in cooldown
+	end
+	
 	if not lastSaveTime[userId] then
 		return true
 	end
@@ -116,6 +123,9 @@ local function savePlayerDataToStore(userId, forceImmediate)
 	
 	isSaving[userId] = true
 	lastSaveTime[userId] = tick()
+	
+	-- Set cooldown to prevent spam (minimum 2 seconds between saves per Roblox limits)
+	saveCooldowns[userId] = tick() + 2
 	
 	local success, err = pcall(function()
 		statsStore:UpdateAsync("Player_" .. userId, function(oldData)
@@ -437,6 +447,49 @@ Players.PlayerRemoving:Connect(function(player)
 	isSaving[player.UserId] = nil
 end)
 
+-- ===== QUEST DATA FUNCTIONS =====
+local QuestDataStore = require(script.Parent:WaitForChild("QuestDataStore"))
+
+function UnifiedDataStoreManager.SaveQuestData(player, forceImmediate)
+	if not player or not player.UserId then return false end
+	
+	if not forceImmediate and not canSaveNow(player.UserId) then
+		markPending(player.UserId, "quests")
+		return false
+	end
+	
+	local success = QuestDataStore.SaveQuestData(player)
+	
+	if success then
+		lastSaveTime[player.UserId] = tick()
+		saveCooldowns[player.UserId] = tick() + CONFIG.THROTTLE_INTERVAL
+		clearPending(player.UserId, "quests")
+		return true
+	else
+		markPending(player.UserId, "quests")
+		return false
+	end
+end
+
+function UnifiedDataStoreManager.MarkQuestDataPending(userId)
+	markPending(userId, "quests")
+end
+
+-- Save all player data including quests
+function UnifiedDataStoreManager.SaveAll(player, forceImmediate)
+	if not player or not player.UserId then return false end
+	
+	print("[UnifiedDataStoreManager] Saving ALL data for", player.Name)
+	
+	-- Save stats
+	UnifiedDataStoreManager.SaveStats(player, forceImmediate)
+	
+	-- Save quest data
+	UnifiedDataStoreManager.SaveQuestData(player, forceImmediate)
+	
+	return true
+end
+
 -- Periodic heartbeat to save pending changes that are due
 game:GetService("RunService").Heartbeat:Connect(function()
 	for userId in pairs(pendingChanges) do
@@ -454,6 +507,10 @@ game:GetService("RunService").Heartbeat:Connect(function()
 				
 				if hasPending then
 					savePlayerDataToStore(userId, false)
+					-- Also save quest data if pending
+					if pendingChanges[userId].quests then
+						UnifiedDataStoreManager.SaveQuestData(player, false)
+					end
 				end
 			end
 		end
