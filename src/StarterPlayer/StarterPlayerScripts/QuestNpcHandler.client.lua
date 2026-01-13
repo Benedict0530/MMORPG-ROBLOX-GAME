@@ -17,7 +17,6 @@ local playerGui = player:WaitForChild("PlayerGui")
 local gameGui = playerGui:WaitForChild("GameGui")
 local questGui = gameGui:WaitForChild("NpcQuestButtons")
 local QuestButton = questGui:WaitForChild("Button1")
-local WhoAreYouButton = questGui:WaitForChild("Button2")
 local GoodByeButton = questGui:WaitForChild("Button3")
 
 local questProgressGui = gameGui:WaitForChild("QuestProgressGui")
@@ -117,28 +116,29 @@ local function updateQuestProgressGui(questId)
 	local questValue = questFolder:FindFirstChild("Quest_" .. questId)
 	if not questValue then return end
 	
-	local progressValue = questValue:FindFirstChild("progress")
-	if not progressValue then return end
-	
 	-- Get quest data
 	local quest = NpcQuestData.GetQuest(questId)
 	if not quest then return end
 	
-	-- Get current progress and target from objectives
-	local currentProgress = progressValue.Value
-	local targetProgress = 0
-	local enemyType = "Enemy"
+	-- Build progress text for all objectives
+	local progressLines = {}
 	
-	-- Access first objective (most quests have one main objective)
-	if quest.objectives and quest.objectives[1] then
-		targetProgress = quest.objectives[1].target or 0
-		enemyType = quest.objectives[1].enemyType or "Enemy"
-	end
-	
-	-- Ensure all values are valid
-	if not enemyType or targetProgress == 0 then
-		print("[QuestNpcHandler] ⚠️ Quest data incomplete for quest", questId, "| Enemy:", enemyType, "| Target:", targetProgress)
-		return
+	-- Handle multiple objectives
+	if quest.objectives then
+		for objectiveIdx, objective in ipairs(quest.objectives) do
+			local enemyType = objective.enemyType or "Enemy"
+			local targetProgress = objective.target or 0
+			
+			-- Get current progress for this specific objective
+			local progressValueName = "ObjectiveProgress_" .. objectiveIdx
+			local progressValue = questValue:FindFirstChild(progressValueName)
+			local currentProgress = progressValue and progressValue.Value or 0
+			
+			-- Ensure all values are valid
+			if enemyType and targetProgress > 0 then
+				table.insert(progressLines, string.format("Kill %s %d / %d", tostring(enemyType), currentProgress, targetProgress))
+			end
+		end
 	end
 	
 	-- Update GUI text
@@ -146,8 +146,9 @@ local function updateQuestProgressGui(questId)
 	if missionLabel then
 		local missionText = missionLabel:FindFirstChild("Mission")
 		if missionText then
-			missionText.Text = string.format("Kill %s %d / %d", tostring(enemyType), currentProgress, targetProgress)
-			print("[QuestNpcHandler] ✅ Updated progress GUI:", missionText.Text)
+			local finalText = table.concat(progressLines, "\n")
+			missionText.Text = finalText
+			print("[QuestNpcHandler] ✅ Updated progress GUI:", finalText)
 		end
 	end
 end
@@ -185,32 +186,85 @@ local function showQuestProgress(questId)
 	questProgressGui.Visible = true
 	updateQuestProgressGui(questId)
 	
-	-- Monitor for progress changes
+	-- Monitor for progress changes on ObjectiveProgress_* values
 	local questFolder = player:FindFirstChild("Quests")
 	if questFolder then
 		local questValue = questFolder:FindFirstChild("Quest_" .. questId)
 		if questValue then
-			local progressValue = questValue:FindFirstChild("progress")
-			if progressValue then
-				-- Connect to progress changes
-				local connection
-				connection = progressValue.Changed:Connect(function()
-					updateQuestProgressGui(questId)
-					
-					-- Check if quest is completed
-					local statusValue = questValue:FindFirstChild("status")
-					if statusValue and statusValue.Value == "completed" then
-						questProgressGui.Visible = false
-						connection:Disconnect()
-						print("[QuestNpcHandler] ✅ Quest completed - hiding progress GUI")
-						
-						-- Refresh quest indicators for next quest
-						task.wait(0.2)
-						scanAndCreateQuestIndicators()
-						print("[QuestNpcHandler] 🔄 Quest indicators refreshed after completion")
+			-- Store connections so we can disconnect them later
+			local connections = {}
+			
+			-- Function to connect to all current ObjectiveProgress values
+			local function connectToObjectiveProgress()
+				for _, child in ipairs(questValue:GetChildren()) do
+					if string.match(child.Name, "ObjectiveProgress_") and child:IsA("IntValue") then
+						-- Only connect if not already connected
+						if not connections[child.Name] then
+							connections[child.Name] = child.Changed:Connect(function()
+								updateQuestProgressGui(questId)
+								
+								-- Check if quest is completed
+								local statusValue = questValue:FindFirstChild("status")
+								if statusValue and statusValue.Value == "completed" then
+									questProgressGui.Visible = false
+									questGui.Visible = false -- Also hide the button panel
+									print("[QuestNpcHandler] ✅ Quest completed - hiding progress GUI and buttons")
+									
+									-- Disconnect all connections
+									for _, conn in pairs(connections) do
+										conn:Disconnect()
+									end
+									
+									-- Refresh quest indicators for next quest
+									task.wait(0.2)
+									scanAndCreateQuestIndicators()
+									print("[QuestNpcHandler] 🔄 Quest indicators refreshed after completion")
+								end
+							end)
+						end
 					end
-				end)
+				end
 			end
+			
+			-- Initial connect to existing ObjectiveProgress values
+			connectToObjectiveProgress()
+			
+			-- Also monitor for new ObjectiveProgress values being added
+			questValue.ChildAdded:Connect(function(child)
+				if string.match(child.Name, "ObjectiveProgress_") and child:IsA("IntValue") then
+					if not connections[child.Name] then
+						connections[child.Name] = child.Changed:Connect(function()
+							updateQuestProgressGui(questId)
+							
+							-- Check if quest is completed
+							local statusValue = questValue:FindFirstChild("status")
+							if statusValue and statusValue.Value == "completed" then
+								questProgressGui.Visible = false
+								questGui.Visible = false -- Also hide the button panel
+								print("[QuestNpcHandler] ✅ Quest completed - hiding progress GUI and buttons")
+								
+								-- Disconnect all connections
+								for _, conn in pairs(connections) do
+									conn:Disconnect()
+								end
+								
+								-- Refresh quest indicators for next quest
+								task.wait(0.2)
+								scanAndCreateQuestIndicators()
+								print("[QuestNpcHandler] 🔄 Quest indicators refreshed after completion")
+							end
+						end)
+						
+						-- IMPORTANT: Update GUI immediately with the current value
+						-- This ensures the UI reflects the value when ObjectiveProgress is first created
+						-- (not just on subsequent changes)
+						task.defer(function()
+							updateQuestProgressGui(questId)
+							print("[QuestNpcHandler] 📊 Updated GUI after new ObjectiveProgress value created:", child.Name)
+						end)
+					end
+				end
+			end)
 		end
 	end
 end
@@ -427,7 +481,6 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 	if not UserInputService.TouchEnabled then
 		ButtonAnimateModule.SetupButtons({
 			QuestButton = QuestButton,
-			WhoAreYouButton = WhoAreYouButton,
 			GoodByeButton = GoodByeButton
 		})
 		print("[QuestNpcHandler] 🖱️ Button hover animations enabled")
@@ -439,24 +492,19 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 	QuestButton.Text = "Quest"
 	QuestButton.Active = true
 	QuestButton.Visible = true
-	WhoAreYouButton.Text = "Who are you?"
-	WhoAreYouButton.Active = true
-	WhoAreYouButton.Visible = true
 	GoodByeButton.Text = "Goodbye"
 	GoodByeButton.Active = true
 	GoodByeButton.Visible = true
 	print("[QuestNpcHandler] ✅ Default button states set")
 	
-	-- If all quests completed, hide Quest button and "Who are you?" button
+	-- If all quests completed, hide Quest button
 	if allQuestsCompleted then
 		QuestButton.Visible = false
-		WhoAreYouButton.Visible = false
-		print("[QuestNpcHandler] ⚠️ All quests completed - hiding Quest and response buttons")
-	-- If current quest is already accepted, hide Quest button and "Who are you?" button
+		print("[QuestNpcHandler] ⚠️ All quests completed - hiding Quest button")
+	-- If current quest is already accepted, hide Quest button
 	elseif questIsAccepted then
 		QuestButton.Visible = false
-		WhoAreYouButton.Visible = false
-		print("[QuestNpcHandler] ⚠️ Quest already accepted - hiding Quest and response buttons")
+		print("[QuestNpcHandler] ⚠️ Quest already accepted - hiding Quest button")
 	end
 	
 	-- Track button states
@@ -465,12 +513,10 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 	
 	-- Store connections to disconnect them later
 	local questButtonConnection
-	local whoAreYouButtonConnection
 	local goodByeButtonConnection
 	
 	-- Disconnect any existing connections first
 	if questButtonConnection then questButtonConnection:Disconnect() end
-	if whoAreYouButtonConnection then whoAreYouButtonConnection:Disconnect() end
 	if goodByeButtonConnection then goodByeButtonConnection:Disconnect() end
 	
 	-- Setup button click logic
@@ -486,14 +532,134 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 		
 		if quest then
 			if not questStarted then
+				-- Check if trying to access Grimleaf 1 quests without completing Grimleaf Entrance first
+				if data.mapName == "Grimleaf 1" then
+					local grimleafEntranceCompleted = true
+					local questFolder = player:FindFirstChild("Quests")
+					
+					if questFolder then
+						-- Check if all Grimleaf Entrance quests (1-5) are completed
+						for questId = 1, 5 do
+							local questValue = questFolder:FindFirstChild("Quest_" .. questId)
+							if not questValue then
+								grimleafEntranceCompleted = false
+								break
+							end
+							
+							local statusValue = questValue:FindFirstChild("status")
+							if not statusValue or statusValue.Value ~= "completed" then
+								grimleafEntranceCompleted = false
+								break
+							end
+						end
+					end
+					
+					if not grimleafEntranceCompleted then
+						print("[QuestNpcHandler] ⚠️ Player must complete all Grimleaf Entrance quests first!")
+						local head = data.npc:FindFirstChild("Head")
+						if head then
+							local greetingGui = head:FindFirstChild("GreetingGui")
+							if greetingGui then
+								local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
+								if dialogueLabel then
+									dialogueLabel.Text = "Greetings, adventurer.\nBut first, you must complete your tasks in Grimleaf Entrance.\nSpeak with my brother there - the Forest Warden."
+								end
+							end
+						end
+						task.wait(2)
+						questGui.Visible = false
+						CameraFocusModule.RestoreDefault()					
+					-- Destroy billboard GUI
+					local head = data.npc:FindFirstChild("Head")
+					if head then
+						local greetingGui = head:FindFirstChild("GreetingGui")
+						if greetingGui then
+							greetingGui:Destroy()
+							print("[QuestNpcHandler] 🗑️ Billboard destroyed")
+						end
+					end
+					
+					-- Re-enable proximity prompt
+					local promptPart = data.npc:FindFirstChild(data.promptPartName)
+					if promptPart then
+						local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
+						if proximityPrompt then
+							proximityPrompt.Enabled = true
+							print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
+						end
+					end
+											isProcessing = false
+						return
+					end
+				end
+				
+				-- Check if trying to access Grimleaf Exit quests without completing Grimleaf 1 first
+				if data.mapName == "Grimleaf Exit" then
+					local grimleaf1Completed = true
+					local questFolder = player:FindFirstChild("Quests")
+					
+					if questFolder then
+						-- Check if all Grimleaf 1 quests (6-8) are completed
+						for questId = 6, 8 do
+							local questValue = questFolder:FindFirstChild("Quest_" .. questId)
+							if not questValue then
+								grimleaf1Completed = false
+								break
+							end
+							
+							local statusValue = questValue:FindFirstChild("status")
+							if not statusValue or statusValue.Value ~= "completed" then
+								grimleaf1Completed = false
+								break
+							end
+						end
+					end
+					
+					if not grimleaf1Completed then
+						print("[QuestNpcHandler] ⚠️ Player must complete all Grimleaf 1 quests first!")
+						local head = data.npc:FindFirstChild("Head")
+						if head then
+							local greetingGui = head:FindFirstChild("GreetingGui")
+							if greetingGui then
+								local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
+								if dialogueLabel then
+									dialogueLabel.Text = "Greetings, brave adventurer.\nBut first, you must complete your tasks in Grimleaf 1.\nGo back and help my brother contain the Red Gloop infestation."
+								end
+							end
+						end
+						task.wait(2)
+						questGui.Visible = false
+						CameraFocusModule.RestoreDefault()					
+					-- Destroy billboard GUI
+					local head = data.npc:FindFirstChild("Head")
+					if head then
+						local greetingGui = head:FindFirstChild("GreetingGui")
+						if greetingGui then
+							greetingGui:Destroy()
+							print("[QuestNpcHandler] 🗑️ Billboard destroyed")
+						end
+					end
+					
+					-- Re-enable proximity prompt
+					local promptPart = data.npc:FindFirstChild(data.promptPartName)
+					if promptPart then
+						local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
+						if proximityPrompt then
+							proximityPrompt.Enabled = true
+							print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
+						end
+					end
+											isProcessing = false
+						return
+					end
+				end
+				
 				-- First click - show first dialogue
 				questStarted = true
 				
 				-- Clear all button texts and deactivate
 				QuestButton.Text = ""
 				QuestButton.Active = false
-				WhoAreYouButton.Text = ""
-				WhoAreYouButton.Active = false
 				GoodByeButton.Text = ""
 				GoodByeButton.Active = false
 				print("[QuestNpcHandler] All buttons cleared and deactivated")
@@ -522,7 +688,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 							QuestButton.Text = "NEXT"
 							QuestButton.Active = true
 							QuestButton.Visible = true
-							WhoAreYouButton.Visible = false
+
 							GoodByeButton.Text = "Never mind"
 							GoodByeButton.Active = true
 							GoodByeButton.Visible = true
@@ -530,15 +696,14 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 						end
 					end
 				end
-			else
+			elseif QuestButton.Text == "NEXT" then
 				-- NEXT button clicked - show second dialogue
 				print("[QuestNpcHandler] ✅ Clicked: NEXT button")
 				
 				-- Clear and deactivate buttons
 				QuestButton.Text = ""
 				QuestButton.Active = false
-				WhoAreYouButton.Text = ""
-				WhoAreYouButton.Active = false
+
 				GoodByeButton.Text = ""
 				GoodByeButton.Active = false
 				print("[QuestNpcHandler] All buttons cleared and deactivated")
@@ -560,19 +725,156 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 							print("[QuestNpcHandler] Displaying dialogue 2 of", #quest.dialogue)
 							typeText(dialogueLabel, dialogueText, 0.02)
 							
-							-- Show 2 response buttons
-							task.wait(1.5)
-							if quest.responses then
-								WhoAreYouButton.Text = quest.responses[1].text
-								WhoAreYouButton.Active = true
-								WhoAreYouButton.Visible = true
+						-- Show 2 buttons: Accept and Never mind
+						task.wait(1.5)
+						if quest.responses then
+							QuestButton.Text = "I'll take care of them"
+							QuestButton.Active = true
+							QuestButton.Visible = true
+							
+							GoodByeButton.Text = "Never mind"
+							GoodByeButton.Active = true
+							GoodByeButton.Visible = true
+							print("[QuestNpcHandler] ✅ Showing accept and never mind buttons")
+							end
+						end
+					end
+				end
+			elseif QuestButton.Text == "I'll take care of them" then
+				-- Accept button clicked - accept the quest
+				print("[QuestNpcHandler] ✅ Clicked: I'll take care of them")
+				
+				-- Check if player already has an active quest
+				if hasActiveQuest() then
+					print("[QuestNpcHandler] ⚠️ Player already has an active quest!")
+					local head = data.npc:FindFirstChild("Head")
+					if head then
+						local greetingGui = head:FindFirstChild("GreetingGui")
+						if greetingGui then
+							local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
+							if dialogueLabel then
+								dialogueLabel.Text = "You already have an active quest!\nComplete it first."
+							end
+						end
+					end
+					task.wait(2)
+					questGui.Visible = false
+					CameraFocusModule.RestoreDefault()
+					
+					-- Re-enable proximity prompt
+					local promptPart = data.npc:FindFirstChild(data.promptPartName)
+					if promptPart then
+						local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
+						if proximityPrompt then
+							proximityPrompt.Enabled = true
+							print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
+						end
+					end
+					
+					isProcessing = false
+					return
+				end
+				
+				-- Get NEXT available quest in chain
+				local quest = NpcQuestData.GetNextAvailableQuestByMapName(data.mapName, player)
+				if not quest then
+					print("[QuestNpcHandler] ⚠️ No quest found for map:", data.mapName)
+					isProcessing = false
+					return
+				end
+				
+				-- Check if quest is already completed
+				if isQuestCompleted(quest.questId) then
+					print("[QuestNpcHandler] ⚠️ Quest", quest.questId, "already completed!")
+					local head = data.npc:FindFirstChild("Head")
+					if head then
+						local greetingGui = head:FindFirstChild("GreetingGui")
+						if greetingGui then
+							local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
+							if dialogueLabel then
+								dialogueLabel.Text = "Thank you for your help, brave adventurer!"
+							end
+						end
+					end
+					task.wait(2)
+					questGui.Visible = false
+					CameraFocusModule.RestoreDefault()
+					isProcessing = false
+					return
+				end
+				
+				-- Fire server event to accept quest
+				QuestAcceptanceEvent:FireServer(quest.questId)
+				print("[QuestNpcHandler] 📤 Sent quest acceptance to server for quest", quest.questId)
+				
+				-- Show quest progress GUI
+				task.delay(0.5, function()
+					showQuestProgress(quest.questId)
+					print("[QuestNpcHandler] 📊 Showing quest progress GUI for quest", quest.questId)
+				end)
+				
+				-- Deactivate and clear all buttons immediately
+				QuestButton.Active = false
+				GoodByeButton.Active = false
+				QuestButton.Text = ""
+				GoodByeButton.Text = ""
+				print("[QuestNpcHandler] Buttons deactivated and cleared")
+				
+				if quest and quest.responses and quest.responses[1] then
+					-- Show NPC's response to accepting the quest
+					local head = data.npc:FindFirstChild("Head")
+					if head then
+						local greetingGui = head:FindFirstChild("GreetingGui")
+						if greetingGui then
+							local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
+							if dialogueLabel then
+								dialogueLabel.Text = ""
+								task.wait(0.1)
 								
-								GoodByeButton.Text = "Never mind"
+								local nextDialogue = quest.responses[1].nextDialogue
+								local responseText = nextDialogue.npc .. ":\n" .. nextDialogue.text
+								
+								typeText(dialogueLabel, responseText, 0.02)
+								print("[QuestNpcHandler] Showing quest acceptance dialogue")
+								
+								-- Wait for dialogue to finish and then reset everything
+								task.wait(3)
+								
+								-- Destroy billboard GUI
+								if greetingGui then
+									greetingGui:Destroy()
+									print("[QuestNpcHandler] 🗑️ Billboard destroyed after quest acceptance")
+								end
+								
+								-- Hide quest GUI
+								questGui.Visible = false
+								print("[QuestNpcHandler] 👁️ QuestGui hidden")
+								
+								-- Reset button texts and visibility
+								QuestButton.Text = "Quest"
+								QuestButton.Active = true
+								QuestButton.Visible = true
+
+								GoodByeButton.Text = "Goodbye"
 								GoodByeButton.Active = true
 								GoodByeButton.Visible = true
+								print("[QuestNpcHandler] 🔄 Buttons reset to default")
 								
-								QuestButton.Visible = false
-								print("[QuestNpcHandler] ✅ Showing response options")
+								-- Re-enable proximity prompt
+								local promptPart = data.npc:FindFirstChild(data.promptPartName)
+								if promptPart then
+									local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
+									if proximityPrompt then
+										proximityPrompt.Enabled = true
+										print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
+									end
+								end
+								
+								-- Restore camera to default (third-person view)
+								print("[QuestNpcHandler] 📷 Restoring camera to default view")
+								CameraFocusModule.RestoreDefault()
+								task.wait(0.2)
+								print("[QuestNpcHandler] ✅ Quest accepted - camera reset, conversation ended")
 							end
 						end
 					end
@@ -580,144 +882,6 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 			end
 		else
 			print("[QuestNpcHandler] ⚠️ No quest found for map:", data.mapName)
-		end
-		
-		isProcessing = false -- Allow next click
-	end)
-	
-	whoAreYouButtonConnection = WhoAreYouButton.MouseButton1Click:Connect(function()
-		if isProcessing then return end -- Prevent button spam
-		isProcessing = true
-		
-		print("[QuestNpcHandler] ✅ Clicked: I'll take care of them")
-		
-		-- Check if player already has an active quest
-		if hasActiveQuest() then
-			print("[QuestNpcHandler] ⚠️ Player already has an active quest!")
-			local head = data.npc:FindFirstChild("Head")
-			if head then
-				local greetingGui = head:FindFirstChild("GreetingGui")
-				if greetingGui then
-					local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
-					if dialogueLabel then
-						dialogueLabel.Text = "You already have an active quest!\nComplete it first."
-					end
-				end
-			end
-			task.wait(2)
-			questGui.Visible = false
-			CameraFocusModule.RestoreDefault()
-			isProcessing = false
-			return
-		end
-		
-		-- Get NEXT available quest in chain
-		local quest = NpcQuestData.GetNextAvailableQuestByMapName(data.mapName, player)
-		if not quest then
-			print("[QuestNpcHandler] ⚠️ No quest found for map:", data.mapName)
-			isProcessing = false
-			return
-		end
-		
-		-- Check if quest is already completed
-		if isQuestCompleted(quest.questId) then
-			print("[QuestNpcHandler] ⚠️ Quest", quest.questId, "already completed!")
-			local head = data.npc:FindFirstChild("Head")
-			if head then
-				local greetingGui = head:FindFirstChild("GreetingGui")
-				if greetingGui then
-					local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
-					if dialogueLabel then
-						dialogueLabel.Text = "Thank you for your help, brave adventurer!"
-					end
-				end
-			end
-			task.wait(2)
-			questGui.Visible = false
-			CameraFocusModule.RestoreDefault()
-			isProcessing = false
-			return
-		end
-		
-		-- Fire server event to accept quest
-		QuestAcceptanceEvent:FireServer(quest.questId)
-		print("[QuestNpcHandler] 📤 Sent quest acceptance to server for quest", quest.questId)
-		
-		-- Show quest progress GUI
-		task.delay(0.5, function()
-			showQuestProgress(quest.questId)
-			print("[QuestNpcHandler] 📊 Showing quest progress GUI for quest", quest.questId)
-		end)
-		
-		-- Deactivate and clear all buttons immediately
-		QuestButton.Active = false
-		WhoAreYouButton.Active = false
-		GoodByeButton.Active = false
-		QuestButton.Text = ""
-		WhoAreYouButton.Text = ""
-		GoodByeButton.Text = ""
-		print("[QuestNpcHandler] Buttons deactivated and cleared")
-		
-		if quest and quest.responses and quest.responses[1] then
-			-- Show NPC's response to accepting the quest
-			local head = data.npc:FindFirstChild("Head")
-			if head then
-				local greetingGui = head:FindFirstChild("GreetingGui")
-				if greetingGui then
-					local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
-					if dialogueLabel then
-						dialogueLabel.Text = ""
-						task.wait(0.1)
-						
-						local nextDialogue = quest.responses[1].nextDialogue
-						local responseText = nextDialogue.npc .. ":\n" .. nextDialogue.text
-						
-						typeText(dialogueLabel, responseText, 0.02)
-						print("[QuestNpcHandler] Showing quest acceptance dialogue")
-						
-						-- Wait for dialogue to finish and then reset everything
-						task.wait(3)
-						
-						-- Destroy billboard GUI
-						if greetingGui then
-							greetingGui:Destroy()
-							print("[QuestNpcHandler] 🗑️ Billboard destroyed after quest acceptance")
-						end
-						
-						-- Hide quest GUI
-						questGui.Visible = false
-						print("[QuestNpcHandler] 👁️ QuestGui hidden")
-						
-						-- Reset button texts and visibility
-						QuestButton.Text = "Quest"
-						QuestButton.Active = true
-						QuestButton.Visible = true
-						WhoAreYouButton.Text = "Who are you?"
-						WhoAreYouButton.Active = true
-						WhoAreYouButton.Visible = false
-						GoodByeButton.Text = "Goodbye"
-						GoodByeButton.Active = true
-						GoodByeButton.Visible = true
-						print("[QuestNpcHandler] 🔄 Buttons reset to default")
-						
-						-- Re-enable proximity prompt
-						local promptPart = data.npc:FindFirstChild(data.promptPartName)
-						if promptPart then
-							local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
-							if proximityPrompt then
-								proximityPrompt.Enabled = true
-								print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
-							end
-						end
-						
-						-- Restore camera to default (third-person view)
-						print("[QuestNpcHandler] 📷 Restoring camera to default view")
-						CameraFocusModule.RestoreDefault()
-						task.wait(0.2)
-						print("[QuestNpcHandler] ✅ Quest accepted - camera reset, conversation ended")
-					end
-				end
-			end
 		end
 		
 		isProcessing = false -- Allow next click
@@ -731,7 +895,6 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 		
 		-- Disconnect all button connections
 		if questButtonConnection then questButtonConnection:Disconnect() end
-		if whoAreYouButtonConnection then whoAreYouButtonConnection:Disconnect() end
 		if goodByeButtonConnection then goodByeButtonConnection:Disconnect() end
 		print("[QuestNpcHandler] All button connections disconnected")
 		
@@ -753,9 +916,6 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 		QuestButton.Text = "Quest"
 		QuestButton.Active = true
 		QuestButton.Visible = true
-		WhoAreYouButton.Text = "Who are you?"
-		WhoAreYouButton.Active = true
-		WhoAreYouButton.Visible = true
 		GoodByeButton.Text = "Goodbye"
 		GoodByeButton.Active = true
 		GoodByeButton.Visible = true

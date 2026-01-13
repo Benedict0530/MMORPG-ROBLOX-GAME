@@ -7,6 +7,59 @@ local PhysicsService = game:GetService("PhysicsService")
 
 local ItemDropManager = {}
 
+-- Create a billboard with the item name on top of the item
+local function createItemNameBillboard(item, itemName)
+	-- Find a suitable part for the billboard (head, primary part, or first part)
+	local billboardPart = item:FindFirstChild("Head")
+	if not billboardPart then
+		billboardPart = item.PrimaryPart
+	end
+	if not billboardPart then
+		-- Find first BasePart
+		for _, child in ipairs(item:GetDescendants()) do
+			if child:IsA("BasePart") then
+				billboardPart = child
+				break
+			end
+		end
+	end
+	
+	if not billboardPart then return end
+	
+	-- Create billboard GUI
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "ItemNameBillboard"
+	billboard.Size = UDim2.new(10, 0, 0.5, 0)
+	billboard.MaxDistance = 100
+	billboard.StudsOffset = Vector3.new(0, 0, 0)
+	billboard.Parent = billboardPart
+	billboard.AlwaysOnTop = true
+	
+	-- Create text label for item name
+	local textLabel = Instance.new("TextLabel")
+	textLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	textLabel.BackgroundTransparency = 1
+	textLabel.Size = UDim2.new(1, 0, 1, 0)
+	textLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- White color
+	textLabel.TextScaled = true
+	textLabel.Font = Enum.Font.GothamBold
+	textLabel.Text = itemName
+	textLabel.Parent = billboard
+	
+	-- Add UIStroke for visibility
+	local uiStroke = Instance.new("UIStroke")
+	uiStroke.Color = Color3.fromRGB(0, 0, 0)
+	uiStroke.Thickness = 2
+	uiStroke.Parent = textLabel
+	
+	-- Add corner radius
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = textLabel
+	
+	print("[ItemDropManager] ✅ Item name billboard created for", itemName)
+end
+
 -- Spawn an item drop at the specified position
 -- Returns the spawned item object
 function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByPlayer)
@@ -50,6 +103,11 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		dropTimeValue.Name = "DropTime"
 		dropTimeValue.Value = tick()
 		dropTimeValue.Parent = item
+		
+		local pickupRestrictionValue = Instance.new("NumberValue")
+		pickupRestrictionValue.Name = "PickupRestrictionDuration"
+		pickupRestrictionValue.Value = 10 -- 10 second exclusive ownership window
+		pickupRestrictionValue.Parent = item
 	end
 	
 	-- Set primary part if not already set
@@ -169,6 +227,11 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 	
 	-- Transparency is handled client-side by ItemTransparencyHandler.client.lua
 	-- This allows each player to see different transparency based on ownership
+	
+	-- Create item name billboard (except for coins)
+	if itemName ~= "Coin" and not string.find(itemName:lower(), "coin") then
+		createItemNameBillboard(item, itemName)
+	end
 		
 	-- Destroy item after 30 seconds if not collected
 	task.delay(30, function()

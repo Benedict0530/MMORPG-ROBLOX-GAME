@@ -185,6 +185,16 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 			local oldHealth = enemyHealth.Value
 			enemyHealth.Value = math.max(oldHealth - damage, 0)
             
+			-- Track damage dealt by this player to this enemy
+			-- Create or update the player damage tracker on the enemy model
+			local playerDamageTracker = enemyModel:GetAttribute("PlayerDamageTracker")
+			if not playerDamageTracker then
+				playerDamageTracker = {}
+				enemyModel:SetAttribute("PlayerDamageTracker_" .. player.UserId, 0)
+			end
+			local currentDamage = enemyModel:GetAttribute("PlayerDamageTracker_" .. player.UserId) or 0
+			enemyModel:SetAttribute("PlayerDamageTracker_" .. player.UserId, currentDamage + damage)
+			
 			SoundModule.playSoundInRange("Hit", enemyRoot.Position, "SFX", 100, false, 1)
 			damageEvent:FireAllClients(enemyModel, damage, isCritical, true)
 			print("[WeaponManager] " .. player.Name .. " hit enemy '" .. enemyName .. "' for " .. tostring(damage) .. " damage (crit: " .. tostring(isCritical) .. ") | Enemy health: " .. tostring(enemyHealth.Value) .. "/" .. tostring(oldHealth))

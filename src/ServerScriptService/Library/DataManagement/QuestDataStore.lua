@@ -53,6 +53,16 @@ local function setupQuestFolder(player, data)
 			dateCompletedValue.Value = questData.dateCompleted or ""
 			dateCompletedValue.Parent = questValue
 			
+			-- Restore ObjectiveProgress_* values from saved data
+			if questData.objectiveProgress then
+				for progressName, progressValue in pairs(questData.objectiveProgress) do
+					local objProgressValue = Instance.new("IntValue")
+					objProgressValue.Name = progressName
+					objProgressValue.Value = progressValue
+					objProgressValue.Parent = questValue
+				end
+			end
+			
 			print("[QuestDataStore] Quest", questId, "loaded with status:", statusValue.Value)
 		end
 	end
@@ -188,7 +198,56 @@ function QuestDataStore.GetQuestProgress(player, questId)
 	return progressValue and progressValue.Value or 0
 end
 
--- Update quest progress (for tracking kills, etc)
+-- Update quest progress for a specific enemy type (for multi-objective quests)
+function QuestDataStore.UpdateQuestProgressByEnemyType(player, questId, enemyType, incrementAmount)
+	local questFolder = player:FindFirstChild("Quests")
+	if not questFolder then
+		return
+	end
+	
+	local questValue = questFolder:FindFirstChild("Quest_" .. questId)
+	if not questValue then
+		return
+	end
+	
+	-- Get the quest data to find which objective matches this enemy type
+	local NpcQuestData = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("NpcQuestData"))
+	local quest = NpcQuestData.GetQuest(questId)
+	if not quest or not quest.objectives then
+		return
+	end
+	
+	-- Find which objective matches this enemy type
+	local objectiveIndex = nil
+	for idx, objective in ipairs(quest.objectives) do
+		if objective.enemyType == enemyType then
+			objectiveIndex = idx
+			break
+		end
+	end
+	
+	if not objectiveIndex then
+		print("[QuestDataStore] ⚠️ No objective found for enemy type:", enemyType, "in quest", questId)
+		return
+	end
+	
+	-- Create or update the progress value for this specific objective
+	local progressValueName = "ObjectiveProgress_" .. objectiveIndex
+	local progressValue = questValue:FindFirstChild(progressValueName)
+	
+	if not progressValue then
+		progressValue = Instance.new("IntValue")
+		progressValue.Name = progressValueName
+		progressValue.Value = 0
+		progressValue.Parent = questValue
+	end
+	
+	-- Increment the progress
+	progressValue.Value = progressValue.Value + incrementAmount
+	print("[QuestDataStore] Quest", questId, "objective", objectiveIndex, "(", enemyType, ") progress updated to", progressValue.Value)
+end
+
+-- Update quest progress (legacy - for single objective quests)
 function QuestDataStore.UpdateQuestProgress(player, questId, progressAmount)
 	local questFolder = player:FindFirstChild("Quests")
 	if not questFolder then
@@ -225,8 +284,16 @@ local function convertQuestFolderToTable(questFolder)
 					status = statusValue and statusValue.Value or "available",
 					progress = progressValue and progressValue.Value or 0,
 					dateAccepted = dateAcceptedValue and dateAcceptedValue.Value or "",
-					dateCompleted = dateCompletedValue and dateCompletedValue.Value or ""
+					dateCompleted = dateCompletedValue and dateCompletedValue.Value or "",
+					objectiveProgress = {} -- Store all objective progress values
 				}
+				
+				-- Save all ObjectiveProgress_* values
+				for _, child in ipairs(questValue:GetChildren()) do
+					if string.match(child.Name, "ObjectiveProgress_") and child:IsA("IntValue") then
+						questsData[questId].objectiveProgress[child.Name] = child.Value
+					end
+				end
 			end
 		end
 	end
@@ -296,36 +363,33 @@ end
 
 -- Get quests that are affected by killing a specific enemy type
 -- Returns a table of questIds that have objectives matching the enemy
+-- Uses EXACT name matching, not substring matching
 function QuestDataStore.GetQuestsByEnemyType(enemyType)
-	-- Map enemy types to quest IDs and objectives
-	-- This can be expanded as you add more quests
-	local enemyQuestMap = {
-		["Gloop Crusher"] = {
-			questIds = {1, 2, 3, 4}, -- Quests 1-4: All involve killing Gloop Crusher
-			enemyNames = {"Gloop Crusher", "gloop crusher", "Gloop", "gloop", "slime", "Slime"}
-		},
-		["Giant Gloop Crusher"] = {
-			questIds = {5}, -- Quest 5: Kill 1 Giant Gloop Crusher
-			enemyNames = {"Giant Gloop Crusher", "giant gloop crusher", "giant gloop", "Giant Gloop"}
-		},
-		["Spider"] = {
-			questIds = {}, -- Future quest
-			enemyNames = {"Spider", "spider"}
-		},
-		-- Add more enemy types and their corresponding quests here
-	}
-	
-	-- Search for matching quest(s) based on enemy type
+	local NpcQuestData = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("NpcQuestData"))
 	local matchingQuests = {}
-	for enemyKey, questData in pairs(enemyQuestMap) do
-		for _, name in ipairs(questData.enemyNames) do
-			if enemyType:lower():find(name:lower()) then
-				for _, questId in ipairs(questData.questIds) do
+	
+	-- Normalize the enemy type for comparison (remove trailing numbers and spaces)
+	local normalizedEnemyType = string.gsub(enemyType, "%d+$", "") -- Remove trailing digits
+	normalizedEnemyType = string.gsub(normalizedEnemyType, "%s+$", "") -- Remove trailing spaces
+	
+	print("[QuestDataStore] 🔍 Searching quests for enemy type:", enemyType, "| Normalized:", normalizedEnemyType)
+	
+	-- Loop through ALL quests and check if they have an objective matching this enemy type
+	for questId = 1, 100 do  -- Check up to 100 quests (you can adjust this number)
+		local quest = NpcQuestData.GetQuest(questId)
+		if not quest then break end  -- No more quests
+		
+		-- Check if this quest has any objectives matching the enemy type
+		if quest.objectives then
+			for _, objective in ipairs(quest.objectives) do
+				-- Use exact match (==) for enemy type (case-insensitive)
+				if objective.enemyType and objective.enemyType:lower() == normalizedEnemyType:lower() then
 					if not table.find(matchingQuests, questId) then
 						table.insert(matchingQuests, questId)
+						print("[QuestDataStore] ✅ Found matching quest:", questId, "for enemy:", normalizedEnemyType)
 					end
+					break  -- Found a match in this quest, no need to check other objectives
 				end
-				return matchingQuests
 			end
 		end
 	end

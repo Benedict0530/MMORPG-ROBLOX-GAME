@@ -22,14 +22,10 @@ local PVPHandler = {}
 print("[PVPHandler][DEBUG] Module loaded")
 
 -- Helper function to check if target is in front of or beside the attacker
--- Uses a 120-degree cone (front + sides)
+-- Uses a 360-degree cone (all directions)
 local function isTargetInAttackCone(attackerRoot, targetRoot)
-	local attackDirection = attackerRoot.CFrame.LookVector  -- Forward direction of attacker
-	local directionToTarget = (targetRoot.Position - attackerRoot.Position).Unit
-	
-	-- Dot product: if >= 0.5, target is within ~60 degrees on either side (120 degree total cone)
-	local dotProduct = attackDirection:Dot(directionToTarget)
-	return dotProduct >= 0.5  -- Approximately 60 degrees from center
+	-- 360 degree detection - always return true (any direction is valid)
+	return true
 end
 
 -- Helper function to cast a ray and check if it hits the target

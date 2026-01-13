@@ -4,6 +4,8 @@ local DEFAULT_MAX_HEALTH = 1
 local Players = game:GetService("Players")
 local PhysicsService = game:GetService("PhysicsService")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ServerStorage = game:GetService("ServerStorage")
+
 
 -- Load DamageManager for incoming damage calculations
 local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
@@ -19,6 +21,12 @@ local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Librar
 
 -- Load NpcQuestData for quest objectives
 local NpcQuestData = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("NpcQuestData"))
+
+-- Load PartyDataStore for party tracking
+local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+
+-- Load LevelSystem for level up checks
+local LevelSystem = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("LevelSystem"))
 
 local SoundModule = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("SoundModule"))
 
@@ -174,6 +182,8 @@ function EnemiesManager.Start(model)
 	local lastDamagedByPlayer = nil -- Track which player dealt damage to this enemy
 	local playerStatConnections = {} -- Store connections to player stat changes for cleanup
 	local playerDamage = {} -- Track damage dealt by each player for experience distribution
+	local mostDamageDealer = nil -- Track player who dealt the MOST total damage
+	local mostDamageAmount = 0 -- Track the highest damage amount
 	
 	-- Get DamageEvent to notify clients of damage
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -440,11 +450,38 @@ function EnemiesManager.Start(model)
 		if isDead then return end
 		
 		-- Track damage dealt by players (only when health decreases)
-		if newHealth < lastRecordedHealth and lastDamagedByPlayer then
-			local damageTaken = lastRecordedHealth - newHealth
-			local userId = lastDamagedByPlayer.UserId
-			playerDamage[userId] = (playerDamage[userId] or 0) + damageTaken
-			print("[EnemiesModule] 💥 Player", lastDamagedByPlayer.Name, "dealt", damageTaken, "damage to enemy | Total damage by player:", playerDamage[userId])
+		if newHealth < lastRecordedHealth then
+			-- Find which player dealt the most damage to this enemy
+			local maxPlayerDamage = 0
+			local maxPlayerUserId = nil
+			
+			-- Check all player damage attributes on this enemy
+			local attributes = slime:GetAttributes()
+			for attrName, damageAmount in pairs(attributes) do
+				if string.find(attrName, "^PlayerDamageTracker_") then
+					local userId = tonumber(string.match(attrName, "PlayerDamageTracker_(.+)$"))
+					
+					if userId and damageAmount and damageAmount > maxPlayerDamage then
+						maxPlayerDamage = damageAmount
+						maxPlayerUserId = userId
+					end
+				end
+			end
+			
+			-- Update most damage dealer if we found one
+			if maxPlayerUserId then
+				local player = Players:GetPlayerByUserId(maxPlayerUserId)
+				if player then
+					if maxPlayerDamage > mostDamageAmount then
+						mostDamageAmount = maxPlayerDamage
+						mostDamageDealer = player
+						print("[EnemiesModule] 💥 Most damage dealer updated:", player.Name, "with", maxPlayerDamage, "total damage")
+					end
+					
+					-- Track for experience distribution
+					playerDamage[maxPlayerUserId] = maxPlayerDamage
+				end
+			end
 		end
 		lastRecordedHealth = newHealth
 		
@@ -568,6 +605,29 @@ function EnemiesManager.Start(model)
 			table.clear(playerStatConnections)
 			
 			respawnPosition = defaultPosition  -- Save the spawn position for respawn
+			
+			-- ====== DESTROY ENEMY AND SCHEDULE RESPAWN FIRST ======
+			slime:BreakJoints()
+			SoundModule.playSoundInRange("DiedAudio", root.Position, "SFX", 100, false, 1)
+			task.wait(0.5)
+			slime:Destroy()
+			
+			-- Schedule respawn asynchronously so other death logic can run
+			task.spawn(function()
+				local spawnDelay = (enemyStats and enemyStats.SpawnDelay) or 15
+				task.wait(spawnDelay)
+				local template = ServerStorage:WaitForChild("Enemies"):FindFirstChild(enemyName)
+				if template then
+					local newSlime = template:Clone()
+					newSlime.Parent = parent
+					local newRoot = newSlime:FindFirstChild("HumanoidRootPart")
+					if newRoot and respawnPosition then newRoot.CFrame = CFrame.new(respawnPosition) end
+					task.wait(0.1)  -- Wait for model to fully initialize in workspace
+					task.spawn(EnemiesManager.Start, newSlime)
+				else
+					warn("[GloopCrusher] Could not find template '" .. enemyName .. "' in ServerStorage for respawn!")
+				end
+			end)
 		
 		-- Get enemy experience reward
 		local enemyExperience = enemyStats and enemyStats.Experience or 0
@@ -578,8 +638,18 @@ function EnemiesManager.Start(model)
 			totalDamage = totalDamage + damage
 		end
 		
-		-- Debug: Log experience distribution
-		print("[EnemiesModule] Enemy died:", enemyName, "| Experience:", enemyExperience, "| Total Damage:", totalDamage, "| Players who damaged:", table.getn(playerDamage))
+		-- Debug: Log experience distribution and damage breakdown
+		print("[EnemiesModule] ====== ENEMY DIED ======")
+		print("[EnemiesModule] Enemy:", enemyName)
+		print("[EnemiesModule] Experience:", enemyExperience)
+		print("[EnemiesModule] Total Damage:", totalDamage)
+		print("[EnemiesModule] Players who dealt damage:", table.getn(playerDamage))
+		print("[EnemiesModule] Most damage dealer:", mostDamageDealer and mostDamageDealer.Name or "NONE", "with", mostDamageAmount, "damage")
+		for userId, dmg in pairs(playerDamage) do
+			local p = Players:GetPlayerByUserId(userId)
+			print("[EnemiesModule]   -", p and p.Name or "Unknown", "dealt", dmg, "damage")
+		end
+		print("[EnemiesModule] ====== END ======")
 		
 		-- Distribute experience to all players who dealt damage, proportional to their damage
 		if enemyExperience > 0 then
@@ -602,6 +672,10 @@ function EnemiesManager.Start(model)
 								experienceValue.Value = experienceValue.Value + xpToAward
 								print("[EnemiesModule] Awarded", xpToAward, "XP to", player.Name)
 								
+								-- CRITICAL: Check for level-up after adding enemy kill experience
+								LevelSystem.checkLevelUp(player)
+								print("[EnemiesModule] 🆙 Level-up check triggered for", player.Name)
+								
 								-- NO LONGER writing directly to DataStore on every XP gain
 								-- LevelSystem.server.lua will handle throttled saves when Experience changes
 							end
@@ -614,6 +688,109 @@ function EnemiesManager.Start(model)
 			end
 		end
 		
+		-- ====== SPAWN ITEM DROPS FIRST ======
+		-- Determine spawn position for drops
+		local dropSpawnPosition = root.Position + Vector3.new(0, -2, 0)
+		if mostDamageDealer and mostDamageDealer.Character then
+			local playerRoot = mostDamageDealer.Character:FindFirstChild("HumanoidRootPart")
+			if playerRoot then
+				dropSpawnPosition = Vector3.new(playerRoot.Position.X, root.Position.Y, playerRoot.Position.Z)
+			end
+		end
+		
+		-- Spawn coins
+		local coinTemplate = ServerStorage:FindFirstChild("Coin")
+		
+		if coinTemplate then
+			-- Store template's original CFrame before cloning
+			local templateRoot = coinTemplate:FindFirstChild("HumanoidRootPart") or coinTemplate:FindFirstChild("PrimaryPart") or coinTemplate
+			local originalCFrame = templateRoot.CFrame
+			
+			local coin = coinTemplate:Clone()
+			coin.Parent = workspace
+			local coinRoot = coin:FindFirstChild("HumanoidRootPart") or coin:FindFirstChild("PrimaryPart") or coin
+			
+			-- Spawn coin at drop position
+			if coinRoot then
+				coinRoot.CFrame = CFrame.fromMatrix(dropSpawnPosition, originalCFrame.RightVector, originalCFrame.UpVector)
+			end
+			
+			-- Anchor all coin parts
+			local function anchorCoinParts(obj)
+				if not obj then return end
+				if obj:IsA("BasePart") then
+					obj.Anchored = true
+				end
+				for _, child in ipairs(obj:GetChildren()) do anchorCoinParts(child) end
+			end
+			-- anchorCoinParts(coin)
+			
+			-- Apply coin collision group (same as enemies)
+			local COIN_GROUP = "Coins"
+			local function setCoinCollisionGroup(obj)
+				if not obj then return end
+				if obj:IsA("BasePart") then 
+					obj.CollisionGroup = COIN_GROUP
+					-- Don't set CanCollide to false - let collision groups handle it
+				end
+				for _, child in ipairs(obj:GetChildren()) do setCoinCollisionGroup(child) end
+			end
+			setCoinCollisionGroup(coin)
+			
+			-- Store coin value and mark as collectible item
+			local coinValueObj = coin:FindFirstChild("Value")
+			if not coinValueObj then
+				coinValueObj = Instance.new("IntValue")
+				coinValueObj.Name = "Value"
+				coinValueObj.Parent = coin
+			end
+			coinValueObj.Value = coinValue
+			
+			-- Tag coin so collection script knows to process it
+			local tag = Instance.new("StringValue")
+			tag.Name = "CoinType"
+			tag.Value = "EnemyDrop"
+			tag.Parent = coin
+			
+			-- Store owner (player who dealt most damage) and drop time for pickup restriction
+			if mostDamageDealer then
+				local ownerValue = Instance.new("ObjectValue")
+				ownerValue.Name = "DropOwner"
+				ownerValue.Value = mostDamageDealer
+				ownerValue.Parent = coin
+				
+				local dropTimeValue = Instance.new("NumberValue")
+				dropTimeValue.Name = "DropTime"
+				dropTimeValue.Value = tick()
+				dropTimeValue.Parent = coin
+				
+				local pickupRestrictionValue = Instance.new("NumberValue")
+				pickupRestrictionValue.Name = "PickupRestrictionDuration"
+				pickupRestrictionValue.Value = 10 -- 10 second exclusive ownership window
+				pickupRestrictionValue.Parent = coin
+			end
+			
+			-- Transparency is handled client-side by ItemTransparencyHandler.client.lua
+			-- This allows each player to see different transparency based on ownership
+			
+			-- Destroy coin after 120 seconds if not collected
+			task.delay(120, function()
+				if coin and coin.Parent then
+					coin:Destroy()
+				end
+			end)
+		end
+		
+		-- Spawn item drops from enemy stats BEFORE destroying the enemy
+		if enemyStats and enemyStats.Drops then
+			local success, err = pcall(function()
+				local spawnedItems = ItemDropManager.SpawnEnemyDrops(enemyStats, dropSpawnPosition, mostDamageDealer)
+			end)
+			if not success then
+				warn("[EnemiesModule] Failed to spawn item drops: " .. tostring(err))
+			end
+		end
+		
 		-- ====== QUEST PROGRESS TRACKING ======
 		-- Update quest progress for players who dealt damage to this enemy
 		if totalDamage > 0 then
@@ -621,83 +798,125 @@ function EnemiesManager.Start(model)
 				local player = Players:GetPlayerByUserId(userId)
 				if player then
 					-- Get the enemy type/name to find matching quests
-					local enemyType = slime.Name -- e.g., "Gloop", "Spider", etc.
+					-- Normalize enemy name by removing trailing numbers (e.g., "Giant Gloop Crusher1" -> "Giant Gloop Crusher")
+					local enemyType = slime.Name
+					enemyType = string.gsub(enemyType, "%d+$", "") -- Remove trailing digits
+					enemyType = string.gsub(enemyType, "%s+$", "") -- Remove trailing spaces
+					print("[EnemiesModule] 🎯 Original name:", slime.Name, "| Normalized:", enemyType)
 					local matchingQuests = QuestDataStore.GetQuestsByEnemyType(enemyType)
 					
 					if #matchingQuests > 0 then
-						-- Check quests for this player
-						local questsFolder = player:FindFirstChild("Quests")
-						if questsFolder then
-							for _, questId in ipairs(matchingQuests) do
-								local questFolder = questsFolder:FindFirstChild("Quest_" .. questId)
-								if questFolder then
-									-- Check if quest is accepted
-									local statusValue = questFolder:FindFirstChild("status")
-									if statusValue and statusValue.Value == "accepted" then
-										-- Increment progress for this quest
-										local progressValue = questFolder:FindFirstChild("progress")
-										if progressValue then
-											-- Get the quest data to find the target
-											local questData = NpcQuestData.GetQuest(questId)
-											local targetAmount = questData and questData.objectives and questData.objectives[1] and questData.objectives[1].target or 10
-											
-											-- Only increment if we haven't reached the target yet
-											if progressValue.Value < targetAmount then
-												progressValue.Value = progressValue.Value + 1
-												print("[EnemiesModule] 📊 Quest", questId, "progress updated for", player.Name, "| Progress:", progressValue.Value, "/", targetAmount, "| Enemy:", enemyType)
+						-- Collect all players to update: the damager + their party members
+						local playersToUpdate = {player}
+						
+						-- Get player's party to share quest progress
+						local party = PartyDataStore.GetParty(player.UserId)
+						if party then
+							for _, memberPlayer in ipairs(party.members) do
+								if memberPlayer and memberPlayer.Parent and memberPlayer ~= player then
+									table.insert(playersToUpdate, memberPlayer)
+									print("[EnemiesModule] 👥 Added party member", memberPlayer.Name, "to quest progress update")
+								end
+							end
+						end
+						
+						-- Update quest progress for all players (damager + party members)
+						for _, targetPlayer in ipairs(playersToUpdate) do
+							if targetPlayer and targetPlayer.Parent then
+								local questsFolder = targetPlayer:FindFirstChild("Quests")
+								if questsFolder then
+									for _, questId in ipairs(matchingQuests) do
+										local questFolder = questsFolder:FindFirstChild("Quest_" .. questId)
+										if questFolder then
+											-- Check if quest is accepted
+											local statusValue = questFolder:FindFirstChild("status")
+											if statusValue and statusValue.Value == "accepted" then
+												-- Use the new function that tracks progress by enemy type for multi-objective quests
+												QuestDataStore.UpdateQuestProgressByEnemyType(targetPlayer, questId, enemyType, 1)
+												print("[EnemiesModule] 📊 Quest", questId, "progress updated for", targetPlayer.Name, "| Enemy:", enemyType)
 												
-												-- Check if quest objective is now complete
-												if progressValue.Value >= targetAmount then
-													-- Mark quest as completed
-													statusValue.Value = "completed"
-													print("[EnemiesModule] ✅ Quest", questId, "COMPLETED for", player.Name, "!")												
-												-- Get quest data for rewards
+												-- Get the quest data to check if all objectives are complete
 												local questData = NpcQuestData.GetQuest(questId)
-												if questData and questData.rewards then
-													-- Award experience
-													if questData.rewards.experience and questData.rewards.experience > 0 then
-														local stats = player:FindFirstChild("Stats")
-														if stats then
-															local experienceValue = stats:FindFirstChild("Experience")
-															if experienceValue then
-																experienceValue.Value = experienceValue.Value + questData.rewards.experience
-																print("[EnemiesModule] 🎉 Awarded", questData.rewards.experience, "XP for quest completion to", player.Name)
-															end
+												if questData and questData.objectives then
+													local allObjectivesComplete = true
+													
+													-- Check each objective to see if ALL are at their targets
+													for objectiveIdx, objective in ipairs(questData.objectives) do
+														local progressValueName = "ObjectiveProgress_" .. objectiveIdx
+														local objProgressValue = questFolder:FindFirstChild(progressValueName)
+														local currentProgress = objProgressValue and objProgressValue.Value or 0
+														
+														print("[EnemiesModule] 🔍 Quest", questId, "Objective", objectiveIdx, "(", objective.enemyType, "): ", currentProgress, "/", objective.target)
+														
+														if currentProgress < objective.target then
+															allObjectivesComplete = false
+															break
 														end
 													end
 													
-													-- Award gold/coins (use "Money" stat, not "Coins")
-													if questData.rewards.gold and questData.rewards.gold > 0 then
-														local stats = player:FindFirstChild("Stats")
-														if stats then
-															local moneyValue = stats:FindFirstChild("Money")
-															if moneyValue then
-																moneyValue.Value = moneyValue.Value + questData.rewards.gold
-																print("[EnemiesModule] 🎉 Awarded", questData.rewards.gold, "Gold for quest completion to", player.Name)
+													-- If all objectives complete, mark quest as completed
+													if allObjectivesComplete then
+														statusValue.Value = "completed"
+														print("[EnemiesModule] ✅ Quest", questId, "FULLY COMPLETED for", targetPlayer.Name, "!")
+														
+														-- Get quest data for rewards
+														local questData = NpcQuestData.GetQuest(questId)
+														if questData and questData.rewards then
+															-- Award experience
+															if questData.rewards.experience and questData.rewards.experience > 0 then
+																local stats = targetPlayer:FindFirstChild("Stats")
+																if stats then
+																	local experienceValue = stats:FindFirstChild("Experience")
+																	if experienceValue then
+																		experienceValue.Value = experienceValue.Value + questData.rewards.experience
+																		print("[EnemiesModule] 🎉 Awarded", questData.rewards.experience, "XP for quest completion to", targetPlayer.Name)
+																		
+																		-- CRITICAL: Check for level-up after adding quest experience
+																		LevelSystem.checkLevelUp(targetPlayer)
+																		print("[EnemiesModule] 🆙 Level-up check triggered for", targetPlayer.Name)
+																	end
+																end
 															end
+															
+															-- Award gold/coins (use "Money" stat, not "Coins")
+															if questData.rewards.gold and questData.rewards.gold > 0 then
+																local stats = targetPlayer:FindFirstChild("Stats")
+																if stats then
+																	local moneyValue = stats:FindFirstChild("Money")
+																	if moneyValue then
+																		moneyValue.Value = moneyValue.Value + questData.rewards.gold
+																		print("[EnemiesModule] 🎉 Awarded", questData.rewards.gold, "Gold for quest completion to", targetPlayer.Name)
+																	end
+																end
+															end
+															
+															-- Notify client about quest completion with rewards
+															questCompleteEvent:FireClient(targetPlayer, questData.questName, questData.rewards.experience, questData.rewards.gold)
+															local SFXEvent = game:GetService("ReplicatedStorage"):FindFirstChild("SFXEvent")
+															if SFXEvent then
+																SFXEvent:FireClient(targetPlayer, "LevelUp")
+															end
+															print("[EnemiesModule] 📤 Sent quest completion notification to", targetPlayer.Name)
 														end
+													else
+														print("[EnemiesModule] ⏳ Quest", questId, "NOT complete yet - waiting for all objectives")
 													end
-													
-													-- Notify client about quest completion with rewards
-													questCompleteEvent:FireClient(player, questData.questName, questData.rewards.experience, questData.rewards.gold)
-													print("[EnemiesModule] 📤 Sent quest completion notification to", player.Name)
+												else
+													print("[EnemiesModule] ⚠️ Quest", questId, "has no objectives data!")
 												end
+												
+												-- Save quest progress to DataStore immediately
+												UnifiedDataStoreManager.SaveQuestData(targetPlayer, false)
+												print("[EnemiesModule] 💾 Quest progress saved for", targetPlayer.Name)
+												
+												-- Save player experience to DataStore (using proper LevelData save)
+												UnifiedDataStoreManager.SaveLevelData(targetPlayer, false)
+												print("[EnemiesModule] 💾 Player experience saved to DataStore for", targetPlayer.Name)
+												
+												-- Save player money to DataStore (using proper Money save)
+												UnifiedDataStoreManager.SaveMoney(targetPlayer, false)
+												print("[EnemiesModule] 💾 Player money saved to DataStore for", targetPlayer.Name)
 											end
-										else
-											print("[EnemiesModule] ⚠️ Quest", questId, "already at target (", progressValue.Value, "/", targetAmount, ") for", player.Name)
-										end
-										
-										-- Save quest progress to DataStore immediately
-										UnifiedDataStoreManager.SaveQuestData(player, true)
-										print("[EnemiesModule] 💾 Quest progress saved for", player.Name)
-										
-										-- Save player experience to DataStore (using proper LevelData save)
-										UnifiedDataStoreManager.SaveLevelData(player, true)
-										print("[EnemiesModule] 💾 Player experience saved to DataStore for", player.Name)
-										
-										-- Save player money to DataStore (using proper Money save)
-										UnifiedDataStoreManager.SaveMoney(player, true)
-										print("[EnemiesModule] 💾 Player money saved to DataStore for", player.Name)
 										end
 									end
 								end
@@ -708,128 +927,9 @@ function EnemiesManager.Start(model)
 			end
 		end
 	
-	local ServerStorage = game:GetService("ServerStorage")
 	
-	-- Determine spawn position for drops
-	local dropSpawnPosition = root.Position + Vector3.new(0, -2, 0)
-	if lastDamagedByPlayer and lastDamagedByPlayer.Character then
-		local playerRoot = lastDamagedByPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if playerRoot then
-			dropSpawnPosition = Vector3.new(playerRoot.Position.X, root.Position.Y, playerRoot.Position.Z)
-		end
-	end
 	
-	-- Spawn coins
-	local coinTemplate = ServerStorage:FindFirstChild("Coin")
 	
-	if coinTemplate then
-		-- Store template's original CFrame before cloning
-		local templateRoot = coinTemplate:FindFirstChild("HumanoidRootPart") or coinTemplate:FindFirstChild("PrimaryPart") or coinTemplate
-		local originalCFrame = templateRoot.CFrame
-		
-		local coin = coinTemplate:Clone()
-		coin.Parent = workspace
-		local coinRoot = coin:FindFirstChild("HumanoidRootPart") or coin:FindFirstChild("PrimaryPart") or coin
-		
-		-- Spawn coin at drop position
-		if coinRoot then
-			coinRoot.CFrame = CFrame.fromMatrix(dropSpawnPosition, originalCFrame.RightVector, originalCFrame.UpVector)
-		end
-		
-		-- Anchor all coin parts
-		local function anchorCoinParts(obj)
-			if not obj then return end
-			if obj:IsA("BasePart") then
-				obj.Anchored = true
-			end
-			for _, child in ipairs(obj:GetChildren()) do anchorCoinParts(child) end
-		end
-		-- anchorCoinParts(coin)
-		
-		-- Apply coin collision group (same as enemies)
-		local COIN_GROUP = "Coins"
-		local function setCoinCollisionGroup(obj)
-			if not obj then return end
-			if obj:IsA("BasePart") then 
-				obj.CollisionGroup = COIN_GROUP
-				-- Don't set CanCollide to false - let collision groups handle it
-			end
-			for _, child in ipairs(obj:GetChildren()) do setCoinCollisionGroup(child) end
-		end
-		setCoinCollisionGroup(coin)
-		
-		-- Store coin value and mark as collectible item
-		local coinValueObj = coin:FindFirstChild("Value")
-		if not coinValueObj then
-			coinValueObj = Instance.new("IntValue")
-			coinValueObj.Name = "Value"
-			coinValueObj.Parent = coin
-		end
-		coinValueObj.Value = coinValue
-		
-		-- Tag coin so collection script knows to process it
-		local tag = Instance.new("StringValue")
-		tag.Name = "CoinType"
-		tag.Value = "EnemyDrop"
-		tag.Parent = coin
-		
-		-- Store owner (player who dealt most damage) and drop time for pickup restriction
-		if lastDamagedByPlayer then
-			local ownerValue = Instance.new("ObjectValue")
-			ownerValue.Name = "DropOwner"
-			ownerValue.Value = lastDamagedByPlayer
-			ownerValue.Parent = coin
-			
-			local dropTimeValue = Instance.new("NumberValue")
-			dropTimeValue.Name = "DropTime"
-			dropTimeValue.Value = tick()
-			dropTimeValue.Parent = coin
-		end
-		
-		-- Transparency is handled client-side by ItemTransparencyHandler.client.lua
-		-- This allows each player to see different transparency based on ownership
-		
-		-- Destroy coin after 120 seconds if not collected
-		task.delay(120, function()
-			if coin and coin.Parent then
-				coin:Destroy()
-			end
-		end)
-	end
-	
-	-- Spawn item drops from enemy stats BEFORE destroying the enemy
-	if enemyStats and enemyStats.Drops then
-		local success, err = pcall(function()
-			local spawnedItems = ItemDropManager.SpawnEnemyDrops(enemyStats, dropSpawnPosition, lastDamagedByPlayer)
-		end)
-		if not success then
-			warn("[EnemiesModule] Failed to spawn item drops: " .. tostring(err))
-		end
-	end
-	
-	-- Wait a bit to ensure items are properly spawned before destroying the enemy
-	
-	-- -- Destroy humanoid and joints
-	-- if slime.Humanoid then
-	-- 	slime.Humanoid:Disconnect()
-	-- end
-	slime:BreakJoints()
-	SoundModule.playSoundInRange("DiedAudio", root.Position, "SFX", 100, false, 1)
-	task.wait(0.5)
-	slime:Destroy()
-			local spawnDelay = (enemyStats and enemyStats.SpawnDelay) or 15
-			task.wait(spawnDelay)
-			local template = ServerStorage:WaitForChild("Enemies"):FindFirstChild(enemyName)
-			if template then
-				local newSlime = template:Clone()
-				newSlime.Parent = parent
-				local newRoot = newSlime:FindFirstChild("HumanoidRootPart")
-				if newRoot and respawnPosition then newRoot.CFrame = CFrame.new(respawnPosition) end
-				task.wait(0.1)  -- Wait for model to fully initialize in workspace
-				task.spawn(EnemiesManager.Start, newSlime)
-			else
-				warn("[GloopCrusher] Could not find template '" .. enemyName .. "' in ServerStorage for respawn!")
-			end
 		end)
 	end
 	task.spawn(moveTowardsTarget)

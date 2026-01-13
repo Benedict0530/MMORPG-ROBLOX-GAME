@@ -43,10 +43,15 @@ local function monitorItem(item)
 			if dropOwner and dropTime then
 				local ownerValue = dropOwner.Value
 				local elapsedTime = tick() - dropTime.Value
-				local isOwnershipExpired = elapsedTime >= 10 -- 10 second exclusive ownership window
-				
-				-- Determine transparency for this player
-				local targetTransparency = 0 -- Default: fully visible
+			
+			-- Get pickup restriction duration from the drop (defaults to 10 if not found)
+			local pickupRestrictionDuration = 10
+			local pickupRestrictionValue = item:FindFirstChild("PickupRestrictionDuration")
+			if pickupRestrictionValue then
+				pickupRestrictionDuration = pickupRestrictionValue.Value
+			end
+			
+			local isOwnershipExpired = elapsedTime >= pickupRestrictionDuration
 				
 				if not isOwnershipExpired then
 					-- Ownership window is active

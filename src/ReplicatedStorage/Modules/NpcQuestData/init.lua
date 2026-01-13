@@ -54,7 +54,7 @@ NpcQuestData.Quests = {
 		-- Quest rewards
 		rewards = {
 			experience = 50,
-			gold = 250
+			gold = 100
 		},
 		
 		-- Quest status
@@ -111,7 +111,7 @@ NpcQuestData.Quests = {
 		-- Quest rewards
 		rewards = {
 			experience = 100,
-			gold = 500
+			gold = 200
 		},
 		
 		-- Quest status
@@ -168,7 +168,7 @@ NpcQuestData.Quests = {
 		-- Quest rewards
 		rewards = {
 			experience = 200,
-			gold = 1000
+			gold = 250
 		},
 		
 		-- Quest status
@@ -225,7 +225,7 @@ NpcQuestData.Quests = {
 		-- Quest rewards
 		rewards = {
 			experience = 500,
-			gold = 2500
+			gold = 500
 		},
 		
 		-- Quest status
@@ -267,6 +267,12 @@ NpcQuestData.Quests = {
 			}
 		},
 		
+		-- Completion dialogue (shown after quest is completed)
+		completionDialogue = {
+			npc = "Forest Warden",
+			text = "You've done it! You've saved Grimleaf Entrance!\nBut I fear this is only the beginning...\nThere's a deeper infestation spreading to the east.\nMy brother guards the path to Grimleaf 1.\nGo to him and tell him what you've learned.\nHe will need your help to contain the Red Gloop creatures!"
+		},
+		
 		-- Quest objectives
 		objectives = {
 			{
@@ -282,19 +288,376 @@ NpcQuestData.Quests = {
 		-- Quest rewards
 		rewards = {
 			experience = 1000,
-			gold = 5000
+			gold = 1000
 		},
 		
 		-- Quest status
 		status = "available",
 		questGiver = "Forest Warden"
+	},
+	
+	[6] = {
+		questId = 6,
+		questName = "A New Threat Emerges",
+		questIcon = "🟠",
+		description = "Red Gloop creatures appear in Grimleaf",
+		npcName = "Forest Warden",
+		mapName = "Grimleaf 1",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Forest Warden",
+				text = "Thank you for stopping the Mother Gloop...\nBut our troubles aren't over yet!"
+			},
+			{
+				npc = "Forest Warden",
+				text = "A new variant has appeared - Red Gloop creatures!\nThey seem to be adapting. Can you clear them out along with the remaining Gloop Crushers?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I'll handle the new threat.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Forest Warden",
+					text = "Excellent! Defeat 5 Gloop Crushers and 5 Red Gloop Crushers.\nStay vigilant out there!"
+				}
+			}
+		},
+		
+		-- Quest objectives (multiple objectives for different enemy types)
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 5 Gloop Crushers",
+				enemyType = "Gloop Crusher",
+				target = 5,
+				progress = 0,
+				completed = false
+			},
+			{
+				id = 2,
+				description = "Defeat 5 Red Gloop Crushers",
+				enemyType = "Red Gloop Crusher",
+				target = 5,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 75,
+			gold = 150
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Forest Warden"
+	},
+	
+	[7] = {
+		questId = 7,
+		questName = "Red Invasion",
+		questIcon = "🔴",
+		description = "More Red Gloop creatures are spreading",
+		npcName = "Forest Warden",
+		mapName = "Grimleaf 1",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Forest Warden",
+				text = "The Red Gloop creatures are multiplying faster than the original species!\nThey're more aggressive and harder to contain."
+			},
+			{
+				npc = "Forest Warden",
+				text = "We need a bigger push. Can you defeat 10 of them?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I'll stop them.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Forest Warden",
+					text = "Thank you! Defeat 10 Red Gloop Crushers.\nThe forest's survival depends on it."
+				}
+			}
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 10 Red Gloop Crushers",
+				enemyType = "Red Gloop Crusher",
+				target = 10,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 150,
+			gold = 300
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Forest Warden"
+	},
+	
+	[8] = {
+		questId = 8,
+		questName = "Red Onslaught",
+		questIcon = "💔",
+		description = "The final stand against the Red Gloop invasion",
+		npcName = "Forest Warden",
+		mapName = "Grimleaf 1",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Forest Warden",
+				text = "This is our final stand! The Red Gloop creatures have overrun the forest!\nWe must push back with everything we have!"
+			},
+			{
+				npc = "Forest Warden",
+				text = "I'm asking for one last massive effort from you.\nCan you defeat 20 Red Gloop creatures?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "For Grimleaf! For the forest!",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Forest Warden",
+					text = "YES! Defeat 20 Red Gloop Crushers!\nIf we succeed, we can finally reclaim our home!"
+				}
+			}
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 20 Red Gloop Crushers",
+				enemyType = "Red Gloop Crusher",
+				target = 20,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 300,
+			gold = 600
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Forest Warden"
+	},
+	
+	[9] = {
+		questId = 9,
+		questName = "The Exit Secured",
+		questIcon = "🌊",
+		description = "Defend the exit from the Red Gloop surge",
+		npcName = "Forest Guardian",
+		mapName = "Grimleaf Exit",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Forest Guardian",
+				text = "Brave warrior, the Red Gloop creatures are trying to break through to the exit!\nWe need to hold the line here."
+			},
+			{
+				npc = "Forest Guardian",
+				text = "Can you defeat 30 of them to slow their advance?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I'll hold the line.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Forest Guardian",
+					text = "Thank you! Defeat 30 Red Gloop Crushers.\nThe exit's safety depends on your strength!"
+				}
+			}
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 30 Red Gloop Crushers",
+				enemyType = "Red Gloop Crusher",
+				target = 30,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 400,
+			gold = 800
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Forest Guardian"
+	},
+	
+	[10] = {
+		questId = 10,
+		questName = "Last Stand",
+		questIcon = "🔥",
+		description = "Make a final desperate stand against overwhelming odds",
+		npcName = "Forest Guardian",
+		mapName = "Grimleaf Exit",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Forest Guardian",
+				text = "They keep coming! The infestation is relentless!\nWe're being overwhelmed by sheer numbers!"
+			},
+			{
+				npc = "Forest Guardian",
+				text = "I need you to make another stand. Can you defeat 50 Red Gloop creatures?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I won't let them through!",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Forest Guardian",
+					text = "YES! Defeat 50 Red Gloop Crushers!\nFight with everything you have!"
+				}
+			}
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 50 Red Gloop Crushers",
+				enemyType = "Red Gloop Crusher",
+				target = 50,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 700,
+			gold = 1400
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Forest Guardian"
+	},
+	
+	[11] = {
+		questId = 11,
+		questName = "The Red Mother",
+		questIcon = "❤️",
+		description = "Defeat the source of the Red Gloop infestation",
+		npcName = "Forest Guardian",
+		mapName = "Grimleaf Exit",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Forest Guardian",
+				text = "You've slaughtered countless Red Gloop creatures, but there's one final threat...\nThe source of this red plague - the Red Giant Gloop Crusher!"
+			},
+			{
+				npc = "Forest Guardian",
+				text = "It's absolutely monstrous and impossibly powerful.\nBut if we defeat it, the infestation will finally end.\nAre you ready for this ultimate challenge?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I'll end this once and for all.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Forest Guardian",
+					text = "Go forth, legendary hero! Defeat the Red Giant Gloop Crusher!\nThe entire realm depends on you!"
+				}
+			}
+		},
+		
+		-- Completion dialogue (shown after quest is completed)
+		completionDialogue = {
+			npc = "Forest Guardian",
+			text = "You've done the impossible! You've saved us all!\nThe Red Gloop infestation has finally been contained.\nYou are a true hero of Grimleaf.\nMay peace return to our forest once more..."
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 1 Red Giant Gloop Crusher",
+				enemyType = "Red Giant Gloop Crusher",
+				target = 1,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 1500,
+			gold = 2000
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Forest Guardian"
 	}
 }
 
 -- Map quests relationship (map name -> quest IDs)
 NpcQuestData.MapQuests = {
 	["Grimleaf Entrance"] = {1, 2, 3, 4, 5},
-	["Grimleaf 1"] = {1, 2, 3, 4, 5},
+	["Grimleaf 1"] = {6, 7, 8},
+	["Grimleaf Exit"] = {9, 10, 11},
 	["Frozen Realm"] = 2,
 	-- Add more maps and their corresponding quests here
 }

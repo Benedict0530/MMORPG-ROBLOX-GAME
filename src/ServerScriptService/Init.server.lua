@@ -223,6 +223,17 @@ else
 	error("[Init] Failed to load PVPHandler: " .. tostring(err))
 end
 
+local PlayerInteractionManager
+success, err = pcall(function()
+	PlayerInteractionManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PlayerInteractionManager"))
+	PlayerInteractionManager.Initialize()
+end)
+if success then
+	print("[Init] ✓ PlayerInteractionManager initialized")
+else
+	error("[Init] Failed to load PlayerInteractionManager: " .. tostring(err))
+end
+
 local PlayerNameDisplay
 success, err = pcall(function()
 	PlayerNameDisplay = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("PlayerNameDisplay"))
