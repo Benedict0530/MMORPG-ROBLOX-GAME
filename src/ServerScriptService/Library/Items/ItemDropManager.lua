@@ -4,6 +4,7 @@
 local ServerStorage = game:GetService("ServerStorage")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PhysicsService = game:GetService("PhysicsService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local ItemDropManager = {}
 
@@ -67,18 +68,32 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		return nil
 	end
 	
-	-- Try to find item template in ServerStorage (check both direct and in subfolders)
-	local itemTemplate = ServerStorage:WaitForChild("Weapons"):FindFirstChild(itemName)
+	-- If this is a spirit orb, use SpawnOrbDrop instead
+	if itemName == "Normal Orb" or itemName == "Fire Orb" or itemName == "Water Orb" or itemName == "Wind Orb" or itemName == "Earth Orb" or itemName == "Lightning Orb" or itemName == "Dark Orb" or itemName == "Light Orb" or itemName == "Shadow Orb" or itemName == "Radiant Orb" then
+		return ItemDropManager.SpawnOrbDrop(itemName, spawnPosition, enemyDefeatedByPlayer)
+	end
+	
+	-- Try to find item template in ServerStorage (Weapons, Items, Armors)
+	local itemTemplate = nil
+	local weaponsFolder = ServerStorage:FindFirstChild("Weapons")
+	if weaponsFolder then
+		itemTemplate = weaponsFolder:FindFirstChild(itemName)
+	end
 	if not itemTemplate then
-		-- Try to find in Items folder or other locations
 		local itemsFolder = ServerStorage:FindFirstChild("Items")
 		if itemsFolder then
 			itemTemplate = itemsFolder:FindFirstChild(itemName)
 		end
 	end
-	
 	if not itemTemplate then
-		warn("[ItemDropManager] Item template '" .. itemName .. "' not found in ServerStorage")
+		local armorsFolder = ServerStorage:FindFirstChild("Armors")
+		if armorsFolder then
+			itemTemplate = armorsFolder:FindFirstChild(itemName)
+		end
+	end
+
+	if not itemTemplate then
+		warn("[ItemDropManager] Item template '" .. itemName .. "' not found in ServerStorage (Weapons, Items, Armors)")
 		return nil
 	end
 	
@@ -108,6 +123,29 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		pickupRestrictionValue.Name = "PickupRestrictionDuration"
 		pickupRestrictionValue.Value = 10 -- 10 second exclusive ownership window
 		pickupRestrictionValue.Parent = item
+		
+		-- Get party members if owner is in a party
+		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+		local party = PartyDataStore.GetParty(enemyDefeatedByPlayer.UserId)
+		if party and #party.members > 0 then
+			-- Store all party members as allowed owners
+			local partyOwnersValue = Instance.new("ObjectValue")
+			partyOwnersValue.Name = "PartyMembers"
+			partyOwnersValue.Parent = item
+			
+			-- Create a table of party member references
+			for _, member in ipairs(party.members) do
+				if member and member.Parent then
+					local memberValue = Instance.new("ObjectValue")
+					memberValue.Name = "Member_" .. member.UserId
+					memberValue.Value = member
+					memberValue.Parent = partyOwnersValue
+				end
+			end
+			print("[ItemDropManager] ✅ Drop " .. itemName .. " set for party of " .. enemyDefeatedByPlayer.Name .. " (" .. #party.members .. " members)")
+		else
+			print("[ItemDropManager] ℹ️ Drop " .. itemName .. " set for solo player " .. enemyDefeatedByPlayer.Name)
+		end
 	end
 	
 	-- Set primary part if not already set
@@ -184,13 +222,20 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 	
 	-- Tag item so collection script knows to process it
 	local tag = item:FindFirstChild("ItemType")
+	local isQuestItem = false
+	pcall(function()
+		local ItemsData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ItemsData"))
+		if ItemsData[itemName] then
+			isQuestItem = true
+		end
+	end)
 	if not tag then
 		tag = Instance.new("StringValue")
 		tag.Name = "ItemType"
-		tag.Value = "DropItem"
+		tag.Value = isQuestItem and "questItem" or "DropItem"
 		tag.Parent = item
 	else
-		tag.Value = "DropItem"
+		tag.Value = isQuestItem and "questItem" or "DropItem"
 	end
 	
 	-- Store item name for reference
@@ -206,16 +251,28 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 	
 	-- Store item type (weapon, armor, material, potion, etc.)
 	-- Get from WeaponData or use default
+
+	-- Determine item type and category (weapon, armor, etc.)
 	local itemTypeValue = item:FindFirstChild("ItemCategory")
 	local itemType = "weapon" -- default
+	local itemCategory = nil
+	local foundType = false
 	pcall(function()
 		local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
+		local ArmorData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ArmorData"))
 		local weaponStats = WeaponData.GetWeaponStats(itemName)
 		if weaponStats and weaponStats.itemType then
 			itemType = weaponStats.itemType
+			foundType = true
+		end
+		if not foundType then
+			local armorStats = ArmorData[itemName]
+			if armorStats and armorStats.Type then
+				itemType = "armor"
+				itemCategory = armorStats.Type -- Suit, Helmet, Legs
+			end
 		end
 	end)
-	
 	if not itemTypeValue then
 		itemTypeValue = Instance.new("StringValue")
 		itemTypeValue.Name = "ItemCategory"
@@ -223,6 +280,12 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		itemTypeValue.Parent = item
 	else
 		itemTypeValue.Value = itemType
+	end
+	if itemType == "armor" and itemCategory then
+		local armorTypeValue = Instance.new("StringValue")
+		armorTypeValue.Name = "ArmorType"
+		armorTypeValue.Value = itemCategory
+		armorTypeValue.Parent = item
 	end
 	
 	-- Transparency is handled client-side by ItemTransparencyHandler.client.lua
@@ -266,6 +329,186 @@ function ItemDropManager.SpawnEnemyDrops(enemyStats, spawnPosition, defeatedByPl
 	end
 	
 	return spawnedItems
+end
+
+-- Spawn a spirit orb drop at the specified position with unique ID
+-- itemType should be "spirit orb"
+-- Returns the spawned orb object
+function ItemDropManager.SpawnOrbDrop(orbName, spawnPosition, enemyDefeatedByPlayer, orbStats)
+	if not orbName or not spawnPosition then
+		return nil
+	end
+	
+	-- Try to find orb template in ServerStorage
+	local orbsFolder = ServerStorage:FindFirstChild("OrbItems")
+	if not orbsFolder then
+		warn("[ItemDropManager] OrbItems folder not found in ServerStorage")
+		return nil
+	end
+	
+	local orbTemplate = orbsFolder:FindFirstChild(orbName)
+	if not orbTemplate then
+		warn("[ItemDropManager] Orb template '" .. orbName .. "' not found in ServerStorage.OrbItems")
+		return nil
+	end
+	
+	-- Clone the orb
+	local orb = orbTemplate:Clone()
+	orb.Parent = workspace
+	
+	-- Generate unique ID for this orb instance
+	local orbId = orbName .. "_" .. tostring(enemyDefeatedByPlayer and enemyDefeatedByPlayer.UserId or "enemy") .. "_" .. tostring(os.time()) .. "_" .. tostring(math.random(100000,999999))
+	
+	-- Store orb metadata
+	if enemyDefeatedByPlayer then
+		local ownerValue = Instance.new("ObjectValue")
+		ownerValue.Name = "DropOwner"
+		ownerValue.Value = enemyDefeatedByPlayer
+		ownerValue.Parent = orb
+		
+		local dropTimeValue = Instance.new("NumberValue")
+		dropTimeValue.Name = "DropTime"
+		dropTimeValue.Value = tick()
+		dropTimeValue.Parent = orb
+		
+		local pickupRestrictionValue = Instance.new("NumberValue")
+		pickupRestrictionValue.Name = "PickupRestrictionDuration"
+		pickupRestrictionValue.Value = 10 -- 10 second exclusive ownership window
+		pickupRestrictionValue.Parent = orb
+		
+		-- Get party members if owner is in a party
+		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+		local party = PartyDataStore.GetParty(enemyDefeatedByPlayer.UserId)
+		if party and #party.members > 0 then
+			local partyOwnersValue = Instance.new("ObjectValue")
+			partyOwnersValue.Name = "PartyMembers"
+			partyOwnersValue.Parent = orb
+			
+			for _, member in ipairs(party.members) do
+				if member and member.Parent then
+					local memberValue = Instance.new("ObjectValue")
+					memberValue.Name = "Member_" .. member.UserId
+					memberValue.Value = member
+					memberValue.Parent = partyOwnersValue
+				end
+			end
+			print("[ItemDropManager] ✅ Orb drop " .. orbName .. " set for party of " .. enemyDefeatedByPlayer.Name .. " (" .. #party.members .. " members)")
+		else
+			print("[ItemDropManager] ℹ️ Orb drop " .. orbName .. " set for solo player " .. enemyDefeatedByPlayer.Name)
+		end
+	end
+	
+	-- Store orb ID
+	local orbIdValue = Instance.new("StringValue")
+	orbIdValue.Name = "OrbId"
+	orbIdValue.Value = orbId
+	orbIdValue.Parent = orb
+	
+	-- Store item type
+	local itemTypeValue = orb:FindFirstChild("ItemType")
+	if not itemTypeValue then
+		itemTypeValue = Instance.new("StringValue")
+		itemTypeValue.Name = "ItemType"
+		itemTypeValue.Value = "spirit orb"
+		itemTypeValue.Parent = orb
+	else
+		itemTypeValue.Value = "spirit orb"
+	end
+	
+	-- Store orb name
+	local orbNameValue = orb:FindFirstChild("OrbName")
+	if not orbNameValue then
+		orbNameValue = Instance.new("StringValue")
+		orbNameValue.Name = "OrbName"
+		orbNameValue.Value = orbName
+		orbNameValue.Parent = orb
+	else
+		orbNameValue.Value = orbName
+	end
+	
+	-- Also store as ItemName for ItemCollectionHandler compatibility
+	local itemNameValue = orb:FindFirstChild("ItemName")
+	if not itemNameValue then
+		itemNameValue = Instance.new("StringValue")
+		itemNameValue.Name = "ItemName"
+		itemNameValue.Value = orbName
+		itemNameValue.Parent = orb
+	else
+		itemNameValue.Value = orbName
+	end
+	
+	-- Set primary part if not already set
+	local primaryPart = orb:FindFirstChild("HumanoidRootPart") or orb:FindFirstChild("PrimaryPart")
+	if not primaryPart then
+		for _, child in ipairs(orb:GetDescendants()) do
+			if child:IsA("BasePart") then
+				primaryPart = child
+				break
+			end
+		end
+	end
+	
+	if primaryPart then
+		orb.PrimaryPart = primaryPart
+	else
+		warn("[ItemDropManager] Could not find any BasePart in orb '" .. orbName .. "'")
+		return nil
+	end
+	
+	-- Weld all parts to the primary part
+	local function weldPartsToRoot(obj, rootPart)
+		if not obj or not rootPart then return end
+		if obj:IsA("BasePart") and obj ~= rootPart then
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = rootPart
+			weld.Part1 = obj
+			weld.Parent = obj
+		end
+		for _, child in ipairs(obj:GetChildren()) do
+			weldPartsToRoot(child, rootPart)
+		end
+	end
+	weldPartsToRoot(orb, primaryPart)
+	
+	-- Position the orb
+	local templatePivot = orbTemplate:GetPivot()
+	local templateOrientation = templatePivot - templatePivot.Position
+	local finalCFrame = CFrame.new(spawnPosition) * templateOrientation
+	orb:PivotTo(finalCFrame)
+	
+	-- Apply collision group for items
+	local ITEM_GROUP = "Items"
+	pcall(function() PhysicsService:RegisterCollisionGroup(ITEM_GROUP) end)
+	pcall(function() PhysicsService:CollisionGroupSetCollidable(ITEM_GROUP, "Env", true) end)
+	
+	local function setItemCollisionGroup(obj)
+		if not obj then return end
+		if obj:IsA("BasePart") then 
+			obj.CollisionGroup = ITEM_GROUP
+		end
+		for _, child in ipairs(obj:GetChildren()) do
+			setItemCollisionGroup(child)
+		end
+	end
+	setItemCollisionGroup(orb)
+	
+	pcall(function() PhysicsService:CollisionGroupSetCollidable(ITEM_GROUP, ITEM_GROUP, true) end)
+	pcall(function() PhysicsService:CollisionGroupSetCollidable(ITEM_GROUP, "Enemies", false) end)
+	pcall(function() PhysicsService:CollisionGroupSetCollidable(ITEM_GROUP, "Players", false) end)
+	pcall(function() PhysicsService:CollisionGroupSetCollidable(ITEM_GROUP, "Env", true) end)
+	
+	-- Create orb name billboard
+	createItemNameBillboard(orb, orbName)
+	
+	-- Destroy orb after 30 seconds if not collected
+	task.delay(30, function()
+		if orb and orb.Parent then
+			orb:Destroy()
+		end
+	end)
+	
+	print("[ItemDropManager] ✅ Orb drop spawned: " .. orbName .. " (id: " .. orbId .. ")")
+	return orb
 end
 
 return ItemDropManager

@@ -1,7 +1,7 @@
 -- OtherPlayerInteractHandler.client.lua
 -- Client-side handler for detecting player clicks
 -- Works on both PC (mouse) and mobile (touch)
-
+local OtherPlayerInteractHandler = {}
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
@@ -19,6 +19,51 @@ local playerNameLabel = playerButton:WaitForChild("PlayerNameLabel")
 local invitePartyButton = playerButton:WaitForChild("InvitePartyButton")
 
 -- Get RemoteEvent for player interactions
+-- Center-screen message utility
+local function showCenterScreenMessage(text, duration)
+	duration = duration or 2
+	local messageGui = playerGui:FindFirstChild("CenterScreenMessage")
+	if not messageGui then
+		messageGui = Instance.new("ScreenGui")
+		messageGui.Name = "CenterScreenMessage"
+		messageGui.ResetOnSpawn = false
+		messageGui.Parent = playerGui
+		local label = Instance.new("TextLabel")
+		label.Name = "MessageLabel"
+		label.Size = UDim2.new(0.6, 0, 0.1, 0)
+		label.Position = UDim2.new(0.2, 0, 0.45, 0)
+		label.BackgroundTransparency = 0.3
+		label.BackgroundColor3 = Color3.fromRGB(30,30,30)
+		label.TextColor3 = Color3.fromRGB(255,255,255)
+		label.TextStrokeTransparency = 0.2
+		label.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+		label.Font = Enum.Font.FredokaOne
+		label.TextScaled = true
+		label.Visible = false
+		label.Parent = messageGui
+	end
+	local label = messageGui:FindFirstChild("MessageLabel")
+	if label then
+		label.Text = text
+		label.Visible = true
+		label.BackgroundTransparency = 0.3
+		label.TextTransparency = 0
+		label.TextStrokeTransparency = 0.2
+		-- Fade out after duration
+		task.spawn(function()
+			task.wait(duration)
+			if label then
+				for i=0,1,0.1 do
+					label.TextTransparency = i
+					label.TextStrokeTransparency = 0.2 + i*0.8
+					label.BackgroundTransparency = 0.3 + i*0.7
+					task.wait(0.03)
+				end
+				label.Visible = false
+			end
+		end)
+	end
+end
 local function getPlayerInteractionEvent()
 	return ReplicatedStorage:WaitForChild("PlayerInteractionEvent")
 end
@@ -51,7 +96,6 @@ local currentSelectedPlayer = nil
 local function hidePlayerInteractionUI()
 	playerInteractionUi.Visible = false
 	currentSelectedPlayer = nil
-	print("[OtherPlayerInteractHandler.client] 🚫 Hidden interaction UI")
 end
 
 local function handlePlayerClick(targetPart)
@@ -181,8 +225,20 @@ local function setupMouseTargetDetection()
 	-- Handle invite party button click
 	invitePartyButton.MouseButton1Click:Connect(function()
 		if currentSelectedPlayer then
+			-- Check if local player is in a party and not leader
+			local partyUI = gameGui:FindFirstChild("PartyUI")
+			local partyList = partyUI and partyUI:FindFirstChild("PartyList")
+			local title = partyUI and partyUI:FindFirstChild("Title")
+			local isInParty = partyList and partyList.Visible
+			local isLeader = false
+			if isInParty and title and title.Visible and title.Text:find(player.Name) then
+				isLeader = true
+			end
+			if isInParty and not isLeader then
+				showCenterScreenMessage("Please ask the party leader to invite.")
+				return
+			end
 			print("[OtherPlayerInteractHandler.client] 📨 Sending Party Invite to: " .. currentSelectedPlayer.Name)
-			
 			-- Fire event to server with interaction type and target player
 			local playerInteractionEvent = getPlayerInteractionEvent()
 			playerInteractionEvent:FireServer("Party Invite", currentSelectedPlayer)
@@ -549,25 +605,29 @@ local function setupPartyInvitationListener()
 	print("[OtherPlayerInteractHandler.client] 🚫 Default PlayerTemplate hidden")
 	
 	-- Listen for party invitations
-	partyInvitationEvent.OnClientEvent:Connect(function(inviterPlayer)
+	partyInvitationEvent.OnClientEvent:Connect(function(inviterPlayer, errorType)
+		if errorType == "AlreadyInParty" then
+			showCenterScreenMessage(inviterPlayer.DisplayName .. " is already in a party.")
+			return
+		end
 		print("[OtherPlayerInteractHandler.client] 🔔 Party invitation received from: " .. inviterPlayer.Name)
-		
+        
 		-- Update invitation label text
 		invitationLabel.Text = inviterPlayer.Name .. " invited you to join a party"
-		
+        
 		-- Show invitation UI
 		invitationFrame.Visible = true
 		print("[OtherPlayerInteractHandler.client] ✅ Invitation UI displayed")
-		
+        
 		-- Handle accept button click
 		local acceptConnection
 		acceptConnection = acceptButton.MouseButton1Click:Connect(function()
 			acceptConnection:Disconnect()
 			print("[OtherPlayerInteractHandler.client] ✅ Party invitation accepted from " .. inviterPlayer.Name)
-			
+            
 			-- Send response to server
 			local response = partyResponseFunction:InvokeServer(inviterPlayer, "Accept")
-			
+            
 			if response then
 				print("[OtherPlayerInteractHandler.client] 🎉 Successfully sent acceptance to server")
 				-- Party list will be shown via PartyCreatedEvent
@@ -575,16 +635,16 @@ local function setupPartyInvitationListener()
 				print("[OtherPlayerInteractHandler.client] ❌ Failed to accept party invitation")
 			end
 		end)
-		
+        
 		-- Handle decline button click
 		local declineConnection
 		declineConnection = declineButton.MouseButton1Click:Connect(function()
 			declineConnection:Disconnect()
 			print("[OtherPlayerInteractHandler.client] ❌ Party invitation declined from " .. inviterPlayer.Name)
-			
+            
 			-- Send response to server
 			partyResponseFunction:InvokeServer(inviterPlayer, "Decline")
-			
+            
 			-- Hide invitation UI
 			invitationFrame.Visible = false
 			print("[OtherPlayerInteractHandler.client] 🚫 Invitation UI hidden")
@@ -605,3 +665,5 @@ end
 
 -- Start immediately
 Initialize()
+
+return OtherPlayerInteractHandler

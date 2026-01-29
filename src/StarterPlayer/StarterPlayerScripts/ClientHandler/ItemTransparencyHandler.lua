@@ -2,7 +2,7 @@
 -- Handles item transparency based on ownership for each player
 -- Items appear faded (0.7) to players who didn't deal the most damage
 -- Items appear normal (0) to the player who dealt the most damage
-
+local ItemTransparencyHandler = {}
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -114,3 +114,5 @@ player.CharacterAdded:Connect(function(newCharacter)
 	character = newCharacter
 	monitorWorkspace()
 end)
+
+return ItemTransparencyHandler

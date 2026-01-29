@@ -9,6 +9,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
 local SoundModule = require(ReplicatedStorage.Modules.SoundModule)
+local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
 
 -- Create RemoteEvent for showing player damage text on clients
 local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
@@ -20,6 +21,30 @@ end
 
 local PVPHandler = {}
 print("[PVPHandler][DEBUG] Module loaded")
+
+-- Track consecutive hits on players (stores hit count and last hit time)
+local consecutiveHits = {}
+local HIT_RESET_TIMEOUT = 5 -- Reset consecutive hits after 5 seconds with no new hits (allows time for combo)
+
+-- Function to get and update consecutive hit count
+local function getAndUpdateHitCount(targetUserId)
+	local currentTime = tick()
+	
+	if not consecutiveHits[targetUserId] then
+		consecutiveHits[targetUserId] = {count = 0, lastHitTime = 0}
+	end
+	
+	-- Reset count if last hit was more than timeout seconds ago
+	if currentTime - consecutiveHits[targetUserId].lastHitTime > HIT_RESET_TIMEOUT then
+		consecutiveHits[targetUserId].count = 0
+	end
+	
+	-- Increment hit count
+	consecutiveHits[targetUserId].count = consecutiveHits[targetUserId].count + 1
+	consecutiveHits[targetUserId].lastHitTime = currentTime
+	
+	return consecutiveHits[targetUserId].count
+end
 
 -- Helper function to check if target is in front of or beside the attacker
 -- Uses a 360-degree cone (all directions)
@@ -166,6 +191,16 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 					hitEnemies[targetPlayer] = nil
 					return
 				end
+				
+				-- Check if both players are in the same party
+				local attackerPartyId = PartyDataStore.GetPartyId(attacker.UserId)
+				local targetPartyId = PartyDataStore.GetPartyId(targetPlayer.UserId)
+				if attackerPartyId and targetPartyId and attackerPartyId == targetPartyId then
+					print("[PVPHandler][DEBUG][Proximity] Target player is in the same party as attacker, blocking damage")
+					hitEnemies[targetPlayer] = nil
+					return
+				end
+				
 					-- Calculate outgoing damage from attacker
 					local outgoingDamage, isCritical = DamageManager.calculateDamage(attacker, weaponName)
 					
@@ -182,7 +217,7 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 
 						-- Save immediately to DataStore for PVP
 						local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-						UnifiedDataStoreManager.SaveStats(targetPlayer, true)
+						UnifiedDataStoreManager.SaveStats(targetPlayer, false)
 
 						-- Handle death
 						if currentHealth.Value <= 0 then
@@ -201,12 +236,190 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 					SoundModule.playSoundByName("Hit", "SFX", false, 1)
 					damageEvent:FireAllClients(targetPlayer.Character, actualDamage, isCritical, false)
 
+					-- Track consecutive hits and apply effects
+					local hitCount = getAndUpdateHitCount(targetPlayer.UserId)
+					
+					if hitCount == 2 then
+						-- Second consecutive hit: apply knockback and ragdoll
+						local KnockbackEvent = ReplicatedStorage:FindFirstChild("KnockbackEvent")
+						if KnockbackEvent and charRoot and targetRoot then
+							-- Calculate knockback direction (away from attacker)
+							local knockbackDirection = (targetRoot.Position - charRoot.Position).Unit
+							KnockbackEvent:FireClient(targetPlayer, knockbackDirection, 100) -- 50 is knockback force
+							print("[PVPHandler] Triggered knockback and ragdoll on " .. targetPlayer.Name .. " (hit count: " .. hitCount .. ")")
+							
+							-- Reset hit counter asynchronously after ragdoll effect (non-blocking)
+							task.spawn(function()
+								task.wait(1.5)
+								consecutiveHits[targetPlayer.UserId] = {count = 0, lastHitTime = 0}
+								print("[PVPHandler] Reset hit counter for " .. targetPlayer.Name .. " after ragdoll")
+							end)
+						end
+					else
+						-- First hit or reset: apply normal paralysis
+						local ParalysisEvent = ReplicatedStorage:FindFirstChild("ParalysisEvent")
+						if ParalysisEvent then
+							ParalysisEvent:FireClient(targetPlayer, 1)
+							print("[PVPHandler] Triggered paralysis effect on " .. targetPlayer.Name .. " (hit count: " .. hitCount .. ")")
+							
+							-- Reset hit counter asynchronously after paralysis effect (non-blocking)
+							task.spawn(function()
+								task.wait(1.2)
+								consecutiveHits[targetPlayer.UserId] = {count = 0, lastHitTime = 0}
+								print("[PVPHandler] Reset hit counter for " .. targetPlayer.Name .. " after paralysis")
+							end)
+						end
+					end
+
+					-- Apply spirit orb highlight effect if attacker has spirit orb equipped
+					local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+					if OrbSpiritHandler.HasSpiritOrb(attacker) then
+						local orbName = OrbSpiritHandler.GetEquippedOrbName(attacker)
+						if orbName and orbName ~= "" then
+							-- Get orb colors table and highlight function from WeaponManager
+							local orbTypeColors = {
+								Fire = Color3.fromRGB(255, 102, 51),
+								Wind = Color3.fromRGB(0, 85, 0),
+								Water = Color3.fromRGB(0, 0, 255),
+								Earth = Color3.fromRGB(83, 28, 0),
+								Shadow = Color3.fromRGB(170, 0, 255),
+								Dark = Color3.fromRGB(0, 0, 0),
+								Light = Color3.fromRGB(255, 255, 255),
+								Radiant = Color3.fromRGB(255, 250, 110),
+							}
+							
+							local function getOrbType(orbNameStr)
+								return orbNameStr:match("^(.+)%s+Orb$") or orbNameStr
+							end
+							
+							local function applyHighlight(targetModel, orbNameStr)
+								if not targetModel or not orbNameStr or orbNameStr == "" then return end
+								local orbType = getOrbType(orbNameStr)
+								local highlightColor = orbTypeColors[orbType]
+								if not highlightColor then return end
+								
+								for _, part in ipairs(targetModel:GetDescendants()) do
+									if part:IsA("BasePart") then
+										task.spawn(function()
+											local originalColor = part.Color
+											part.Color = highlightColor
+											task.wait(0.2)
+											part.Color = originalColor
+										end)
+									end
+								end
+							end
+							
+							task.spawn(function()
+								applyHighlight(targetPlayer.Character, orbName)
+							end)
+						end
+					end
+
 					print("[PVPHandler][Proximity] " .. attacker.Name .. " hit player '" .. targetPlayer.Name .. "' for " .. tostring(actualDamage) .. " damage (crit: " .. tostring(isCritical) .. ")")
 				end
 			end
 		end
 	end
 	return true
+end
+
+
+-- Fire damage zone logic for Workspace/Maps/PVP Area
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local Maps = Workspace:FindFirstChild("Maps")
+local mapList = {}
+if Maps then
+	local pvpArea = Maps:FindFirstChild("PVP Area")
+	if pvpArea then table.insert(mapList, pvpArea) end
+	local grimleaf1 = Maps:FindFirstChild("Grimleaf 1 Dungeon")
+	if grimleaf1 then table.insert(mapList, grimleaf1) end
+end
+
+for _, map in ipairs(mapList) do
+	for _, firePart in ipairs(map:GetChildren()) do
+		if firePart.Name == "Fire" and firePart:IsA("BasePart") then
+			firePart.Touched:Connect(function(hit)
+				local character = hit.Parent
+				local player = Players:GetPlayerFromCharacter(character)
+				if not player then return end
+				if character:GetAttribute("_FireDamageActive") then return end -- Prevent duplicate damage loops
+				character:SetAttribute("_FireDamageActive", true)
+				local stats = player:FindFirstChild("Stats")
+				local currentHealth = stats and stats:FindFirstChild("CurrentHealth")
+				local maxHealth = stats and stats:FindFirstChild("MaxHealth")
+				if not currentHealth or not maxHealth then return end
+				-- Store original colors
+				local originalColors = {}
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						originalColors[part] = part.Color
+						part.Color = Color3.fromRGB(255,0,0)
+					end
+				end
+				-- Damage loop
+				local damageConn
+				local function stopDamage()
+					if damageConn then damageConn:Disconnect() end
+					character:SetAttribute("_FireDamageActive", nil)
+					for part, color in pairs(originalColors) do
+						if part and part:IsA("BasePart") then
+							part.Color = color
+						end
+					end
+				end
+				damageConn = firePart.TouchEnded:Connect(function(endedHit)
+					if endedHit.Parent == character then
+						stopDamage()
+					end
+				end)
+				-- Damage every second while touching, with robust check
+				task.spawn(function()
+					while character:GetAttribute("_FireDamageActive") do
+						-- Robust check: is character still touching firePart?
+						local stillTouching = false
+						for _, part in ipairs(character:GetDescendants()) do
+							if part:IsA("BasePart") then
+								local touching = part:GetTouchingParts()
+								for _, t in ipairs(touching) do
+									if t == firePart then
+										stillTouching = true
+										break
+									end
+								end
+								if stillTouching then break end
+							end
+						end
+						if not stillTouching then
+							stopDamage()
+							break
+						end
+						if currentHealth and maxHealth and currentHealth.Value > 0 then
+							local damage = math.floor(maxHealth.Value * 0.05)
+							local oldHealth = currentHealth.Value
+							currentHealth.Value = math.max(0, currentHealth.Value - damage)
+							-- Fire damage text event for UI
+							local targetPart = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+							if targetPart then
+								damageEvent:FireClient(player, targetPart, damage, false, false)
+							end
+							-- Kill player if HP reaches 0
+							if currentHealth.Value <= 0 then
+								local humanoid = character:FindFirstChild("Humanoid")
+								if humanoid then
+									humanoid:TakeDamage(9999)
+								end
+								stopDamage()
+								break
+							end
+						end
+						task.wait(1)
+					end
+				end)
+			end)
+		end
+	end
 end
 
 return PVPHandler

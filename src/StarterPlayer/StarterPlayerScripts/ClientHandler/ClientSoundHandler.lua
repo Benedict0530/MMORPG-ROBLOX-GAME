@@ -1,3 +1,4 @@
+local ClientSoundHandler = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SFXEvent = ReplicatedStorage:FindFirstChild("SFXEvent")
 local SoundModule = require(ReplicatedStorage.Modules.SoundModule)
@@ -13,3 +14,4 @@ end)
 ProximitySoundEvent.OnClientEvent:Connect(function(soundName, group, loop, duration)
 	SoundModule.playSoundByName(soundName, group, loop, duration)
 end)
+return ClientSoundHandler

@@ -11,8 +11,19 @@ function PlayerNameDisplay.HideDefaultName(player)
 	if not player or not player.Character then
 		return
 	end
-	
-	local humanoid = player.Character:FindFirstChild("Humanoid")
+
+	local character = player.Character
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid then
+		-- Wait up to 10 seconds for Humanoid to appear
+		local timeout = 10
+		local start = tick()
+		repeat
+			humanoid = character:FindFirstChild("Humanoid")
+			if humanoid then break end
+			character.ChildAdded:Wait()
+		until humanoid or tick() - start > timeout
+	end
 	if humanoid then
 		humanoid.NameDisplayDistance = 0 -- Hide default name
 		print("[PlayerNameDisplay] Disabled default name display for:", player.Name)

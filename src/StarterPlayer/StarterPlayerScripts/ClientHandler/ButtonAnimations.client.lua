@@ -1,6 +1,6 @@
 -- ButtonAnimations.client.lua
 -- Handles scaling animations for mobile buttons using UIScale
-
+local ButtonAnimations = {}
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
@@ -133,3 +133,5 @@ if not gameGui then
 end
 
 setupButtonAnimations()
+
+return ButtonAnimations

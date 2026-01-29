@@ -35,6 +35,17 @@ WeaponData.Weapons = {
 		Description = "\"A sturdy plastic sword.\"",
 		Price = 125
 	},
+	["Stone Sword"] = {
+		damage = 20,
+		speed = 1.4,
+		imageId = "rbxassetid://127720248767523",
+		type = "One-Handed",
+		rarity = "Rare",
+		levelRequirement = 20,
+		itemType = "weapon",
+		Description = "\"A heavy stone sword.\"",
+		Price = 500
+	},
 	["Iron Sword"] = {
 		damage = 30,
 		speed = 1.4,

@@ -8,6 +8,11 @@ local defaultCameraType
 local defaultCameraSubject
 local activeTween -- NEW: Store currently playing tween
 local followConnection -- Store the RenderStepped connection
+local UserInputService = game:GetService("UserInputService")
+local currentFOV = 35 -- Track current field of view for zoom
+local MIN_FOV = 10 -- Minimum zoom (furthest out)
+local MAX_FOV = 100 -- Maximum zoom (closest in)
+local ZOOM_SPEED = 2 -- How much FOV changes per scroll
 
 -- Function to disable movement
 local function disableMovement()
@@ -74,6 +79,8 @@ function CameraFocusModule.FocusOn(modelOrPart, duration)
     end)
 end
 
+
+
 function CameraFocusModule.RestoreDefault()
     local camera = workspace.CurrentCamera
     local player = Players.LocalPlayer
@@ -103,10 +110,18 @@ function CameraFocusModule.RestoreDefault()
         camera.CameraType = Enum.CameraType.Follow
         camera.CameraSubject = humanoid
         camera.FieldOfView = 70
+        currentFOV = 70 -- Reset zoom to default
     end
 
     -- Re-enable movement
     enableMovement()
+end
+-- Handle character respawn to restore camera to new character
+function CameraFocusModule.HandleCharacterRespawn(newCharacter)
+    
+    -- Restore default camera for new character
+    task.wait(0.1) -- Wait a bit for character to fully load
+    CameraFocusModule.RestoreDefault()
 end
 
 return CameraFocusModule

@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
 
 -- Create RemoteEvent for stat allocation
 local statsUpdateEvent = ReplicatedStorage:FindFirstChild("AllocateStatPoint")
@@ -14,6 +15,14 @@ if not statsUpdateEvent then
 	statsUpdateEvent = Instance.new("RemoteEvent")
 	statsUpdateEvent.Name = "AllocateStatPoint"
 	statsUpdateEvent.Parent = ReplicatedStorage
+end
+
+-- Create RemoteEvent to trigger UI refresh when stats are updated
+local refreshStatsUIEvent = ReplicatedStorage:FindFirstChild("RefreshStatsUI")
+if not refreshStatsUIEvent then
+	refreshStatsUIEvent = Instance.new("RemoteEvent")
+	refreshStatsUIEvent.Name = "RefreshStatsUI"
+	refreshStatsUIEvent.Parent = ReplicatedStorage
 end
 
 -- Stat costs (points per increase)
@@ -26,7 +35,7 @@ local MAX_STAT_VALUES = {
 }
 
 local function saveStatsToDataStore(player, reason)
-	-- Delegate to UnifiedDataStoreManager
+	-- Delegate to UnifiedDataStoreManager (strip orb bonuses for stat changes)
 	UnifiedDataStoreManager.SaveStats(player, false)
 end
 
@@ -41,21 +50,28 @@ local function allocateStatPoint(player, statType)
 		return false
 	end
 	
+	-- SUSPEND stat change listeners AND prevent orb switch operations
+	-- [REMOVED] OrbSpiritHandler.SetAdminStatChangeFlag
+	local userId = player.UserId
+	
 	local statPoints = stats:FindFirstChild("StatPoints")
 	local statValue = stats:FindFirstChild(statType)
 	
 	if not statPoints or not statValue then
+		-- [REMOVED] OrbSpiritHandler.SetAdminStatChangeFlag
 		return false
 	end
 	
 	-- Check if player has enough stat points
 	if statPoints.Value < STAT_COST then
+		OrbSpiritHandler.SetAdminStatChangeFlag(player, false)
 		return false
 	end
 	
 	-- Check if stat is at max (only Dexterity has a limit)
 	local maxValue = MAX_STAT_VALUES[statType]
 	if maxValue and statValue.Value >= maxValue then
+		OrbSpiritHandler.SetAdminStatChangeFlag(player, false)
 		return false
 	end
 	
@@ -83,6 +99,22 @@ local function allocateStatPoint(player, statType)
 	-- Save to DataStore (throttled)
 	saveStatsToDataStore(player, " (Stat allocation: " .. statType .. ")")
 	
+	-- Small delay to ensure stat value changes have fully propagated
+	task.wait(0.01)
+	
+	-- Update base stats cache to reflect the new allocation (for UI to display correctly)
+	-- This will remove orb bonuses, update base, and reapply orb if needed (no double buff)
+	-- [REMOVED] OrbSpiritHandler.UpdateBaseStats
+
+	-- Delay to ensure cache update completes before UI reads it
+	task.wait(0.05)
+	
+	-- Trigger UI refresh on the client to pull fresh base stats from server
+	refreshStatsUIEvent:FireClient(player)
+	
+	-- RESUME stat change listeners
+	OrbSpiritHandler.SetAdminStatChangeFlag(player, false)
+	
 	return true
 end
 
@@ -100,6 +132,9 @@ local function resetStats(player)
 	if resetPoints.Value <= 0 then
 		return false
 	end
+	
+	-- SUSPEND stat change listeners to prevent recursion
+	OrbSpiritHandler.SetAdminStatChangeFlag(player, true)
 	
 	-- Check if already at default stats to prevent giving extra points
 	local baseStats = {
@@ -123,6 +158,7 @@ local function resetStats(player)
 	if isAtDefault then
 		resetPoints.Value = resetPoints.Value - 1
 		saveStatsToDataStore(player, " (Stats Reset - Already at default - " .. resetPoints.Value .. " resets remaining)")
+		OrbSpiritHandler.SetAdminStatChangeFlag(player, false)
 		return true
 	end
 	
@@ -191,6 +227,21 @@ local function resetStats(player)
 	-- Save to DataStore
 	saveStatsToDataStore(player, " (Stats Reset - " .. resetPoints.Value .. " resets remaining)")
 	
+	-- Small delay to ensure stat changes have fully propagated
+	task.wait(0.01)
+	
+	-- Update base stats cache to reflect the reset (for UI to display correctly)
+	OrbSpiritHandler.UpdateBaseStats(player)
+	
+	-- Delay to ensure cache update completes before UI reads it
+	task.wait(0.05)
+	
+	-- Trigger UI refresh on the client to pull fresh base stats from server
+	refreshStatsUIEvent:FireClient(player)
+	
+	-- RESUME stat change listeners
+	OrbSpiritHandler.SetAdminStatChangeFlag(player, false)
+	
 	return true
 end
 
@@ -201,12 +252,6 @@ statsUpdateEvent.OnServerEvent:Connect(function(player, action, statType)
 	elseif action == "Reset" then
 		resetStats(player)
 	end
-end)
-
--- Cleanup on player leaving
-Players.PlayerRemoving:Connect(function(player)
-	-- Force save if pending - delegated to UnifiedDataStoreManager
-	UnifiedDataStoreManager.SaveAll(player, true)
 end)
 
 return {

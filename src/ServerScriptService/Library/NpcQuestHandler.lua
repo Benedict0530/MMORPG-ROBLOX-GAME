@@ -79,7 +79,7 @@ local function setupQuestNpc(npc)
 	end
 	
 	-- Attach ProximityPrompt to visible part (Head works best)
-	local promptPart = npc:FindFirstChild("LeftHand") or rootPart
+	local promptPart = npc:FindFirstChild("Head") or rootPart
 	
 	-- Create and configure ProximityPrompt
 	local proximityPrompt = Instance.new("ProximityPrompt")
@@ -87,6 +87,7 @@ local function setupQuestNpc(npc)
 	proximityPrompt.ActionText = "Talk"
 	proximityPrompt.KeyboardKeyCode = Enum.KeyCode.E
 	proximityPrompt.MaxActivationDistance = 10
+	proximityPrompt.RequiresLineOfSight = false
 	
 	print("[NpcQuestHandler] ✅ ProximityPrompt created on:", promptPart.Name)
 	
@@ -153,7 +154,7 @@ QuestAcceptanceEvent.OnServerEvent:Connect(function(player, questId)
 	QuestDataStore.AcceptQuest(player, questId)
 	-- Save quest data immediately
 	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-	UnifiedDataStoreManager.SaveQuestData(player, true)
+	UnifiedDataStoreManager.SaveQuestData(player, false)
 end)
 
 print("[NpcQuestHandler] NPC Quest Handler loaded successfully")

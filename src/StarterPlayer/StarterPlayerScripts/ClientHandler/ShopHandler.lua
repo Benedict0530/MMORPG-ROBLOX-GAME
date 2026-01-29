@@ -1,3 +1,4 @@
+local ShopHandler = {}
 -- Helper to format numbers with commas (e.g., 1000 -> 1,000)
 local function formatNumberWithCommas(n)
     local str = tostring(n)
@@ -37,6 +38,8 @@ sellItemTemplate.Visible = false
 
 local Shops = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shops"))
 local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
+local OrbData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("OrbData"))
+local ArmorData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ArmorData"))
 
 local shopScrollingFrame = ShopUI:WaitForChild("Background"):WaitForChild("ScrollingFrame", 5)
 local shopItemTemplate = shopScrollingFrame:WaitForChild("Item", 5)
@@ -48,6 +51,23 @@ local shopEvent = ReplicatedStorage:WaitForChild("ShopEvent")
 
 
 local ShopHandler = {}
+
+-- Helper: Get orb selling price (DISPLAY ONLY - actual prices validated on server)
+local function getOrbSellingPrice(orbName)
+    local orbPrices = {
+        ["Normal Orb"] = 0,
+        ["Fire Orb"] = 10000,
+        ["Wind Orb"] = 20000,
+        ["Water Orb"] = 30000,
+        ["Earth Orb"] = 40000,
+        ["Lightning Orb"] = 50000,
+        ["Dark Orb"] = 60000,
+        ["Light Orb"] = 70000,
+        ["Shadow Orb"] = 80000,
+        ["Radiant Orb"] = 90000
+    }
+    return orbPrices[orbName] or 0
+end
 
 -- Hide shop UI when player dies
 local function setupDeathHideShopUI(character)
@@ -106,19 +126,51 @@ local function getPlayerInventory()
     return {}
 end
 
--- Helper to get equipped item id from player stats
-local function getEquippedItemId()
+-- Helper to get equipped item ids from player stats
+local function getEquippedItemIds()
     local statsFolder = player:FindFirstChild("Stats")
+    if not statsFolder then
+        -- Wait indefinitely for Stats to appear
+        while true do
+            statsFolder = player:FindFirstChild("Stats")
+            if statsFolder then break end
+            player.ChildAdded:Wait()
+        end
+    end
+    if not statsFolder then
+        warn("[ShopHandler] Stats folder not found after waiting!")
+        return
+    end
+    local equippedIds = {}
     if statsFolder then
+        -- Weapon
         local equippedFolder = statsFolder:FindFirstChild("Equipped")
         if equippedFolder and equippedFolder:IsA("Folder") then
             local idValue = equippedFolder:FindFirstChild("id")
             if idValue and idValue:IsA("StringValue") then
-                return idValue.Value
+                equippedIds[idValue.Value] = true
+            end
+        end
+        -- Orb
+        local equippedOrbFolder = statsFolder:FindFirstChild("EquippedOrb")
+        if equippedOrbFolder and equippedOrbFolder:IsA("Folder") then
+            local idValue = equippedOrbFolder:FindFirstChild("id")
+            if idValue and idValue:IsA("StringValue") then
+                equippedIds[idValue.Value] = true
+            end
+        end
+        -- Armors (including shoes)
+        for _, armorSlot in ipairs({"EquippedHelmet", "EquippedSuit", "EquippedLegs", "EquippedShoes"}) do
+            local slotFolder = statsFolder:FindFirstChild(armorSlot)
+            if slotFolder and slotFolder:IsA("Folder") then
+                local idValue = slotFolder:FindFirstChild("id")
+                if idValue and idValue:IsA("StringValue") then
+                    equippedIds[idValue.Value] = true
+                end
             end
         end
     end
-    return nil
+    return equippedIds
 end
 
 -- Helper to create sell item UI
@@ -127,8 +179,8 @@ if sellItemStats then sellItemStats.Visible = false end
 
 local sellButtonConn
 local function createSellItem(item, index)
-    local equippedId = getEquippedItemId()
-    local isEquipped = (item.id == equippedId and equippedId ~= nil and equippedId ~= "")
+    local equippedIds = getEquippedItemIds()
+    local isEquipped = (item.id and equippedIds[item.id])
 
     local itemClone = sellItemTemplate:Clone()
     itemClone.Name = "Item_" .. index
@@ -229,7 +281,16 @@ local function createSellItem(item, index)
     end
     if priceLabel then
         local weaponStats = WeaponData.GetWeaponStats(item.name)
-        local price = weaponStats and weaponStats.Price and math.floor(weaponStats.Price * 0.4) or 0
+        local orbStats = OrbData.GetOrbData(item.name)
+        local armorStats = ArmorData[item.name]
+        local price = 0
+        if orbStats then
+            price = getOrbSellingPrice(item.name)
+        elseif weaponStats then
+            price = weaponStats.Price and math.floor(weaponStats.Price * 0.4) or 0
+        elseif armorStats then
+            price = armorStats.Price and math.floor(armorStats.Price * 0.4) or 0
+        end
         priceLabel.Text = "Sell: $" .. formatNumberWithCommas(price)
     end
 
@@ -245,16 +306,58 @@ local function createSellItem(item, index)
     itemClone.MouseButton1Click:Connect(function()
         if isEquipped then return end -- Prevent showing sell UI for equipped item
         if not sellItemStats then return end
-        local weaponStats = WeaponData.GetWeaponStats(item.name)
         local statsDescription = sellItemStats:FindFirstChild("Description")
-        if statsDescription and weaponStats then
-            local sellPrice = weaponStats.Price and math.floor(weaponStats.Price * 0.4) or 0
-            statsDescription.Text = item.name .. "\n" ..
-                "Damage: " .. tostring(weaponStats.damage) .. "\n" ..
-                "LVL: " .. tostring(weaponStats.levelRequirement or "N/A") .. "\n" ..
-                (weaponStats.Description or "No description available") .. "\n" ..
-                "Sell: $" .. formatNumberWithCommas(sellPrice)
+        if not statsDescription then return end
+        local weaponStats = WeaponData.GetWeaponStats(item.name)
+        local orbStats = OrbData.GetOrbData(item.name)
+        local armorStats = ArmorData[item.name]
+        local descText = ""
+        if orbStats then
+            -- Format orb description (matching inventory UI style)
+            descText = item.name .. "\n"
+            if orbStats.description then
+                descText = descText .. "\n" .. orbStats.description .. "\n"
+            end
+            descText = descText .. "\n📊 Stat Bonuses:\n"
+            if orbStats.stats then
+                for statName, multiplier in pairs(orbStats.stats) do
+                    local bonus = math.floor((multiplier - 1) * 100)
+                    if bonus > 0 then
+                        descText = descText .. "+" .. bonus .. "% " .. statName .. "\n"
+                    end
+                end
+            end
+            if orbStats.chance then
+                descText = descText .. "\nDrop Rate: " .. tostring(math.floor(orbStats.chance * 100)) .. "%"
+            end
+            local sellingPrice = getOrbSellingPrice(item.name)
+            descText = descText .. "\n\nSelling Price: $" .. formatNumberWithCommas(sellingPrice)
+        elseif weaponStats then
+            -- Format weapon description (matching inventory UI style)
+            descText = item.name .. "\n"
+            if weaponStats.Description then
+                descText = descText .. "\n" .. weaponStats.Description .. "\n"
+            end
+            descText = descText .. "\n⚔️ Weapon Stats:\n"
+            descText = descText .. "Damage: " .. tostring(weaponStats.damage) .. "\n"
+            descText = descText .. "Level Requirement: " .. tostring(weaponStats.levelRequirement or "N/A") .. "\n"
+            local price = weaponStats.Price or 0
+            local sellingPrice = math.floor(price * 0.4)
+            descText = descText .. "Selling Price: $" .. formatNumberWithCommas(sellingPrice)
+        elseif armorStats then
+            -- Format armor description (matching inventory UI style)
+            descText = item.name .. "\n"
+            if armorStats.Description then
+                descText = descText .. "\n" .. armorStats.Description .. "\n"
+            end
+            descText = descText .. "\n🛡️ Armor Stats:\n"
+            descText = descText .. "Type: " .. tostring(armorStats.Type or "N/A") .. "\n"
+            descText = descText .. "Defense: " .. tostring(armorStats.Defense or "N/A") .. "\n"
+            local price = armorStats.Price or 0
+            local sellingPrice = math.floor(price * 0.4)
+            descText = descText .. "Selling Price: $" .. formatNumberWithCommas(sellingPrice)
         end
+        statsDescription.Text = descText
         local sellButtonStats = sellItemStats:FindFirstChild("SellButton")
         if sellButtonStats then
             sellButtonStats.Visible = true
@@ -288,7 +391,8 @@ local function populateSellUI()
             local contentY = layout.AbsoluteContentSize.Y
             local frameX = sellScrollingFrame.AbsoluteSize.X
             local frameY = sellScrollingFrame.AbsoluteSize.Y
-            sellScrollingFrame.CanvasSize = UDim2.new(0, math.max(contentX, frameX), 0, math.max(contentY, frameY))
+            -- Always set CanvasSize to content size, not max(content, frame)
+            sellScrollingFrame.CanvasSize = UDim2.new(0, contentX, 0, contentY)
         end
     end
 end
@@ -390,14 +494,31 @@ local function createShopItem(itemName, index)
     itemClone.MouseButton1Click:Connect(function()
         if not shopItemStats then return end
         local weaponStats = WeaponData.GetWeaponStats(itemName)
+        local orbStats = OrbData.GetOrbData(itemName)
+        local armorStats = ArmorData[itemName]
         local statsDescription = shopItemStats:FindFirstChild("Description")
-        if statsDescription and weaponStats then
-            local price = weaponStats.Price or 0
-            statsDescription.Text = itemName .. "\n" ..
-                "Damage: " .. tostring(weaponStats.damage) .. "\n" ..
-                "LVL: " .. tostring(weaponStats.levelRequirement or "N/A") .. "\n" ..
-                (weaponStats.Description or "No description available") .. "\n" ..
-                "Price: $" .. formatNumberWithCommas(price)
+        if statsDescription then
+            if orbStats then
+                local sellingPrice = getOrbSellingPrice(itemName)
+                statsDescription.Text = itemName .. "\n" .. (orbStats.description or "") .. "\n\n📊 Stat Bonuses:\n" .. (function()
+                    local t = ""
+                    if orbStats.stats then
+                        for statName, multiplier in pairs(orbStats.stats) do
+                            local bonus = math.floor((multiplier - 1) * 100)
+                            if bonus > 0 then
+                                t = t .. "+" .. bonus .. "% " .. statName .. "\n"
+                            end
+                        end
+                    end
+                    return t
+                end)() .. (orbStats.chance and ("\nDrop Rate: " .. tostring(math.floor(orbStats.chance * 100)) .. "%") or "") .. "\n\nPrice: $" .. formatNumberWithCommas(sellingPrice)
+            elseif weaponStats then
+                local price = weaponStats.Price or 0
+                statsDescription.Text = itemName .. "\n" .. (weaponStats.Description or "") .. "\n\n⚔️ Weapon Stats:\n" .. "Damage: " .. tostring(weaponStats.damage) .. "\nLevel Requirement: " .. tostring(weaponStats.levelRequirement or "N/A") .. "\nPrice: $" .. formatNumberWithCommas(price)
+            elseif armorStats then
+                local price = armorStats.Price or 0
+                statsDescription.Text = itemName .. "\n" .. (armorStats.Description or "") .. "\n\n🛡️ Armor Stats:\n" .. "Type: " .. tostring(armorStats.Type or "N/A") .. "\nDefense: " .. tostring(armorStats.Defense or "N/A") .. "\nPrice: $" .. formatNumberWithCommas(price)
+            end
         end
         local purchaseButton = shopItemStats:FindFirstChild("PurchaseButton")
         if purchaseButton then
@@ -435,7 +556,8 @@ local function populateShopUI(mapName)
             local contentY = layout.AbsoluteContentSize.Y
             local frameX = shopScrollingFrame.AbsoluteSize.X
             local frameY = shopScrollingFrame.AbsoluteSize.Y
-            shopScrollingFrame.CanvasSize = UDim2.new(0, math.max(contentX, frameX), 0, math.max(contentY, frameY))
+            -- Always set CanvasSize to content size, not max(content, frame)
+            shopScrollingFrame.CanvasSize = UDim2.new(0, contentX, 0, contentY)
         end
     end
 end

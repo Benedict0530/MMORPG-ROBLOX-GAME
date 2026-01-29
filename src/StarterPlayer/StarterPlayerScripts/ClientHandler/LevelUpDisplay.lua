@@ -1,6 +1,6 @@
 -- LevelUpDisplay.client.lua
 -- Client-side script to show level-up animation when player levels up
-
+local LevelUpDisplay = {}
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -24,7 +24,20 @@ print("[LevelUpDisplay.client] Script started")
 
 -- Setup level monitoring
 local function setupLevelMonitoring()
-	local stats = LocalPlayer:WaitForChild("Stats")
+
+	local stats = LocalPlayer:FindFirstChild("Stats")
+	if not stats then
+		-- Wait indefinitely for Stats to appear
+		while true do
+			stats = LocalPlayer:FindFirstChild("Stats")
+			if stats then break end
+			LocalPlayer.ChildAdded:Wait()
+		end
+	end
+	if not stats then
+		warn("[LevelUpDisplay.client] Stats folder not found after waiting!")
+		return
+	end
 	local level = stats:WaitForChild("Level")
 	local experience = stats:WaitForChild("Experience")
 	local neededExperience = stats:WaitForChild("NeededExperience")
@@ -177,3 +190,5 @@ questCompleteEvent.OnClientEvent:Connect(function(questName, experience, gold)
 end)
 
 print("[LevelUpDisplay.client] Quest completion listener setup complete")
+
+return LevelUpDisplay

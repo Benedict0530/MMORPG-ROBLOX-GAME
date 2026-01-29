@@ -1,6 +1,6 @@
 -- QuestNpcHandler.client.lua
 -- Client-side handler for quest NPC interactions
-
+local QuestNpcHandler = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -194,6 +194,33 @@ local function showQuestProgress(questId)
 			-- Store connections so we can disconnect them later
 			local connections = {}
 			
+			-- Function to hide progress GUI when quest completes
+			local function onQuestComplete()
+				questProgressGui.Visible = false
+				questGui.Visible = false -- Also hide the button panel
+				print("[QuestNpcHandler] ✅ Quest completed - hiding progress GUI and buttons")
+				
+				-- Disconnect all connections
+				for _, conn in pairs(connections) do
+					conn:Disconnect()
+				end
+				
+				-- Refresh quest indicators for next quest
+				task.wait(0.2)
+				scanAndCreateQuestIndicators()
+				print("[QuestNpcHandler] 🔄 Quest indicators refreshed after completion")
+			end
+			
+			-- Monitor the status value directly for completion
+			local statusValue = questValue:FindFirstChild("status")
+			if statusValue then
+				connections["statusMonitor"] = statusValue.Changed:Connect(function()
+					if statusValue.Value == "completed" then
+						onQuestComplete()
+					end
+				end)
+			end
+			
 			-- Function to connect to all current ObjectiveProgress values
 			local function connectToObjectiveProgress()
 				for _, child in ipairs(questValue:GetChildren()) do
@@ -203,22 +230,10 @@ local function showQuestProgress(questId)
 							connections[child.Name] = child.Changed:Connect(function()
 								updateQuestProgressGui(questId)
 								
-								-- Check if quest is completed
+								-- Also check status value on progress change (in case status updates at same time)
 								local statusValue = questValue:FindFirstChild("status")
 								if statusValue and statusValue.Value == "completed" then
-									questProgressGui.Visible = false
-									questGui.Visible = false -- Also hide the button panel
-									print("[QuestNpcHandler] ✅ Quest completed - hiding progress GUI and buttons")
-									
-									-- Disconnect all connections
-									for _, conn in pairs(connections) do
-										conn:Disconnect()
-									end
-									
-									-- Refresh quest indicators for next quest
-									task.wait(0.2)
-									scanAndCreateQuestIndicators()
-									print("[QuestNpcHandler] 🔄 Quest indicators refreshed after completion")
+									onQuestComplete()
 								end
 							end)
 						end
@@ -239,19 +254,7 @@ local function showQuestProgress(questId)
 							-- Check if quest is completed
 							local statusValue = questValue:FindFirstChild("status")
 							if statusValue and statusValue.Value == "completed" then
-								questProgressGui.Visible = false
-								questGui.Visible = false -- Also hide the button panel
-								print("[QuestNpcHandler] ✅ Quest completed - hiding progress GUI and buttons")
-								
-								-- Disconnect all connections
-								for _, conn in pairs(connections) do
-									conn:Disconnect()
-								end
-								
-								-- Refresh quest indicators for next quest
-								task.wait(0.2)
-								scanAndCreateQuestIndicators()
-								print("[QuestNpcHandler] 🔄 Quest indicators refreshed after completion")
+								onQuestComplete()
 							end
 						end)
 						
@@ -411,6 +414,59 @@ local function isQuestAccepted(questId)
 	return statusValue and statusValue.Value == "accepted"
 end
 
+-- Map prerequisites: mapName -> prerequisiteMapName
+local MAP_PREREQUISITES = {
+	["Grimleaf 1"] = "Grimleaf Entrance",
+	["Grimleaf Exit"] = "Grimleaf 1",
+	["Frozen Realm Entrance"] = "Grimleaf Exit"
+}
+
+-- Function to get the prerequisite map for a given map
+local function getPrerequisiteMap(mapName)
+	return MAP_PREREQUISITES[mapName]
+end
+
+-- Function to check if all quests in a map are completed
+local function areMapQuestsCompleted(mapName)
+	local questIds = NpcQuestData.MapQuests[mapName]
+	if not questIds then
+		return false
+	end
+	
+	local questFolder = player:FindFirstChild("Quests")
+	if not questFolder then
+		return false
+	end
+	
+	-- Handle single quest or quest chain
+	local questList = type(questIds) == "table" and questIds or {questIds}
+	
+	for _, questId in ipairs(questList) do
+		local questValue = questFolder:FindFirstChild("Quest_" .. questId)
+		if not questValue then
+			return false
+		end
+		
+		local statusValue = questValue:FindFirstChild("status")
+		if not statusValue or statusValue.Value ~= "completed" then
+			return false
+		end
+	end
+	
+	return true
+end
+
+-- Function to check if prerequisites are met for accessing a map
+local function checkMapPrerequisites(mapName)
+	local prereqMap = getPrerequisiteMap(mapName)
+	
+	if not prereqMap then
+		return true -- No prerequisites
+	end
+	
+	return areMapQuestsCompleted(prereqMap)
+end
+
 -- Listen for server events
 QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 	print("[QuestNpcHandler] 🎯 Received quest NPC interaction!")
@@ -532,43 +588,26 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 		
 		if quest then
 			if not questStarted then
-				-- Check if trying to access Grimleaf 1 quests without completing Grimleaf Entrance first
-				if data.mapName == "Grimleaf 1" then
-					local grimleafEntranceCompleted = true
-					local questFolder = player:FindFirstChild("Quests")
+				-- Check if prerequisites are met for this map
+				if not checkMapPrerequisites(data.mapName) then
+					local prereqMap = getPrerequisiteMap(data.mapName)
+					print("[QuestNpcHandler] ⚠️ Player must complete all quests in", prereqMap, "first!")
 					
-					if questFolder then
-						-- Check if all Grimleaf Entrance quests (1-5) are completed
-						for questId = 1, 5 do
-							local questValue = questFolder:FindFirstChild("Quest_" .. questId)
-							if not questValue then
-								grimleafEntranceCompleted = false
-								break
-							end
-							
-							local statusValue = questValue:FindFirstChild("status")
-							if not statusValue or statusValue.Value ~= "completed" then
-								grimleafEntranceCompleted = false
-								break
+					local head = data.npc:FindFirstChild("Head")
+					if head then
+						local greetingGui = head:FindFirstChild("GreetingGui")
+						if greetingGui then
+							local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
+							if dialogueLabel then
+								dialogueLabel.Text = "Greetings, adventurer.\nBut first, you must complete your tasks in " .. prereqMap .. ".\nGo back and complete all the quests there."
 							end
 						end
 					end
 					
-					if not grimleafEntranceCompleted then
-						print("[QuestNpcHandler] ⚠️ Player must complete all Grimleaf Entrance quests first!")
-						local head = data.npc:FindFirstChild("Head")
-						if head then
-							local greetingGui = head:FindFirstChild("GreetingGui")
-							if greetingGui then
-								local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
-								if dialogueLabel then
-									dialogueLabel.Text = "Greetings, adventurer.\nBut first, you must complete your tasks in Grimleaf Entrance.\nSpeak with my brother there - the Forest Warden."
-								end
-							end
-						end
-						task.wait(2)
-						questGui.Visible = false
-						CameraFocusModule.RestoreDefault()					
+					task.wait(2)
+					questGui.Visible = false
+					CameraFocusModule.RestoreDefault()
+					
 					-- Destroy billboard GUI
 					local head = data.npc:FindFirstChild("Head")
 					if head then
@@ -588,70 +627,9 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 							print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
 						end
 					end
-											isProcessing = false
-						return
-					end
-				end
-				
-				-- Check if trying to access Grimleaf Exit quests without completing Grimleaf 1 first
-				if data.mapName == "Grimleaf Exit" then
-					local grimleaf1Completed = true
-					local questFolder = player:FindFirstChild("Quests")
 					
-					if questFolder then
-						-- Check if all Grimleaf 1 quests (6-8) are completed
-						for questId = 6, 8 do
-							local questValue = questFolder:FindFirstChild("Quest_" .. questId)
-							if not questValue then
-								grimleaf1Completed = false
-								break
-							end
-							
-							local statusValue = questValue:FindFirstChild("status")
-							if not statusValue or statusValue.Value ~= "completed" then
-								grimleaf1Completed = false
-								break
-							end
-						end
-					end
-					
-					if not grimleaf1Completed then
-						print("[QuestNpcHandler] ⚠️ Player must complete all Grimleaf 1 quests first!")
-						local head = data.npc:FindFirstChild("Head")
-						if head then
-							local greetingGui = head:FindFirstChild("GreetingGui")
-							if greetingGui then
-								local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
-								if dialogueLabel then
-									dialogueLabel.Text = "Greetings, brave adventurer.\nBut first, you must complete your tasks in Grimleaf 1.\nGo back and help my brother contain the Red Gloop infestation."
-								end
-							end
-						end
-						task.wait(2)
-						questGui.Visible = false
-						CameraFocusModule.RestoreDefault()					
-					-- Destroy billboard GUI
-					local head = data.npc:FindFirstChild("Head")
-					if head then
-						local greetingGui = head:FindFirstChild("GreetingGui")
-						if greetingGui then
-							greetingGui:Destroy()
-							print("[QuestNpcHandler] 🗑️ Billboard destroyed")
-						end
-					end
-					
-					-- Re-enable proximity prompt
-					local promptPart = data.npc:FindFirstChild(data.promptPartName)
-					if promptPart then
-						local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
-						if proximityPrompt then
-							proximityPrompt.Enabled = true
-							print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
-						end
-					end
-											isProcessing = false
-						return
-					end
+					isProcessing = false
+					return
 				end
 				
 				-- First click - show first dialogue
@@ -943,5 +921,13 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 	-- Add your quest UI logic here
 	-- For example: show quest dialog, open quest panel, etc.
 end)
-
+CameraFocusModule.RestoreDefault()
 print("[QuestNpcHandler] Client script loaded - listening for quest NPC interactions")
+
+-- Handle character respawn to restore camera to new character
+player.CharacterAdded:Connect(function(newCharacter)
+	print("[QuestNpcHandler] Character respawned - restoring camera")
+	CameraFocusModule.HandleCharacterRespawn(newCharacter)
+end)
+
+return QuestNpcHandler

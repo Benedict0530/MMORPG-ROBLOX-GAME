@@ -103,6 +103,15 @@ function PlayerInteractionManager.Initialize()
 		
 		-- Handle different interaction types
 		if interactionType == "Party Invite" then
+			-- Check if target player is already in a party
+			local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+			local targetParty = PartyDataStore.GetParty(targetPlayer.UserId)
+			if targetParty then
+				print("[PlayerInteractionManager] ❌ Target " .. targetPlayer.Name .. " is already in a party. Sending error to inviter.")
+				-- Send error to inviter's client for UI display
+				partyInvitationEvent:FireClient(clickingPlayer, targetPlayer, "AlreadyInParty")
+				return
+			end
 			print("[PlayerInteractionManager] 🎪 Sending party invitation to " .. targetPlayer.Name)
 			-- Send invitation to target player's client
 			partyInvitationEvent:FireClient(targetPlayer, clickingPlayer)
@@ -214,15 +223,17 @@ function PlayerInteractionManager.Initialize()
 			-- If leader is leaving, disband entire party
 			if isLeader then
 				print("[PlayerInteractionManager] 💔 Leader left - disbanding party")
-				-- Notify all members that party is disbanded
-				for _, member in ipairs(party.members) do
-					if member and member.Parent then
-						partyMemberLeftEvent:FireClient(member, {})  -- Empty list signals party disbanded
-						print("[PlayerInteractionManager] 📢 Notified " .. member.Name .. " that party disbanded")
-					end
+			-- Get party ID before it gets modified
+			local partyId = PartyDataStore.GetPartyId(actionPlayer.UserId)
+			-- Notify all members that party is disbanded
+			for _, member in ipairs(party.members) do
+				if member and member.Parent then
+					partyMemberLeftEvent:FireClient(member, {})  -- Empty list signals party disbanded
+					print("[PlayerInteractionManager] 📢 Notified " .. member.Name .. " that party disbanded")
 				end
-				-- Disband the party
-				PartyDataStore.DisbandParty(party.id)
+			end
+			-- Disband the party
+			PartyDataStore.DisbandParty(partyId)
 			else
 				-- Regular member leaving - remove just that member
 				PartyDataStore.RemovePlayerFromParty(actionPlayer.UserId)
@@ -304,15 +315,17 @@ function PlayerInteractionManager.Initialize()
 			end
 			
 			print("[PlayerInteractionManager] 💔 Leader is disbanding the entire party")
-			-- Notify all members that party is disbanded
-			for _, member in ipairs(party.members) do
-				if member and member.Parent then
-					partyMemberLeftEvent:FireClient(member, {})  -- Empty list signals party disbanded
-					print("[PlayerInteractionManager] 📢 Notified " .. member.Name .. " that party disbanded")
-				end
+		-- Get party ID
+		local partyId = PartyDataStore.GetPartyId(actionPlayer.UserId)
+		-- Notify all members that party is disbanded
+		for _, member in ipairs(party.members) do
+			if member and member.Parent then
+				partyMemberLeftEvent:FireClient(member, {})  -- Empty list signals party disbanded
+				print("[PlayerInteractionManager] 📢 Notified " .. member.Name .. " that party disbanded")
+			end
 			end
 			-- Disband the party
-			PartyDataStore.DisbandParty(party.id)
+			PartyDataStore.DisbandParty(partyId)
 		else
 			print("[PlayerInteractionManager] ⚠️ Unknown party action: " .. action)
 		end

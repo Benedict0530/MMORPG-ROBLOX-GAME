@@ -7,6 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
 local SFXEvent = ReplicatedStorage:FindFirstChild("SFXEvent")
 
 -- Function to save level and experience to datastore (throttled)
@@ -43,6 +44,7 @@ local function checkLevelUp(player)
 		SFXEvent:FireClient(player, "LevelUp")
 		leveledUp = true
 	end
+	
 	
 	-- Save to datastore (whether leveled up or just gained exp)
 	saveLevelToDataStore(player, level.Value, experience.Value, neededExperience.Value, leveledUp and " (Level Up)" or " (Experience Gain)")
@@ -102,8 +104,7 @@ end
 
 -- Cleanup on player disconnect
 Players.PlayerRemoving:Connect(function(player)
-	-- Force save all data - delegated to UnifiedDataStoreManager
-	UnifiedDataStoreManager.SaveAll(player, true)
+	-- All saves are handled by PlayerDataStore
 end)
 
 return {

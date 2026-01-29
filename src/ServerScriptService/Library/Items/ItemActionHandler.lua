@@ -2,6 +2,7 @@
 -- Handles server-side logic for equipping and dropping items
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
 
 local InventoryManager = require(script.Parent.InventoryManager)
@@ -67,41 +68,60 @@ function ItemActionHandler:EquipItem(player, itemId)
 		return
 	end
 
-	-- Check level requirement before equipping
-	local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
-	local weaponStats = WeaponData.GetWeaponStats(item.name)
-	local requiredLevel = weaponStats and weaponStats.levelRequirement or 1
-	local playerLevel = 1
-	local statsFolder = player:FindFirstChild("Stats")
-	if statsFolder then
-		local levelValue = statsFolder:FindFirstChild("Level")
-		if levelValue and tonumber(levelValue.Value) then
-			playerLevel = tonumber(levelValue.Value)
+	-- Only check level requirement for weapons
+	if item.itemType == "weapon" or item.itemType == nil then
+		local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
+		local weaponStats = WeaponData.GetWeaponStats(item.name)
+		local requiredLevel = weaponStats and weaponStats.levelRequirement or 1
+		local playerLevel = 1
+		local statsFolder = player:FindFirstChild("Stats")
+		if statsFolder then
+			local levelValue = statsFolder:FindFirstChild("Level")
+			if levelValue and tonumber(levelValue.Value) then
+				playerLevel = tonumber(levelValue.Value)
+			end
+		end
+		if playerLevel < requiredLevel then
+			warn("[ItemActionHandler] Player ", player.Name, " does not meet level requirement for ", item.name, ": required=", requiredLevel, ", player=", playerLevel)
+			print("[ItemActionHandler] Firing feedback event to player:", player.Name)
+			-- Send feedback to client about level requirement
+			itemFeedbackEvent:FireClient(player, "LevelRequirementNotMet", {
+				itemName = item.name,
+				requiredLevel = requiredLevel,
+				playerLevel = playerLevel
+			})
+			print("[ItemActionHandler] Feedback event fired successfully")
+			equipDebounce[player][itemId] = nil
+			playerActionLock[player] = nil
+			return
 		end
 	end
-	if playerLevel < requiredLevel then
-		warn("[ItemActionHandler] Player ", player.Name, " does not meet level requirement for ", item.name, ": required=", requiredLevel, ", player=", playerLevel)
-		print("[ItemActionHandler] Firing feedback event to player:", player.Name)
-		-- Send feedback to client about level requirement
-		itemFeedbackEvent:FireClient(player, "LevelRequirementNotMet", {
-			itemName = item.name,
-			requiredLevel = requiredLevel,
-			playerLevel = playerLevel
-		})
-		print("[ItemActionHandler] Feedback event fired successfully")
-		equipDebounce[player][itemId] = nil
-		playerActionLock[player] = nil
-		return
-	end
 
-	-- Update player's equipped slot in stats
-	-- NOTE: InventoryManager.setEquippedWeapon fires EquippedChanged event automatically
-	InventoryManager.setEquippedWeapon(player, item.name, item.id)
-
-	print("[ItemActionHandler] Equipped", item.name, "(id:", item.id, ") for", player.Name)
-	-- Ensure tool is connected by syncing backpack
-	if player.Character then
-		InventoryManager.SyncBackpack(player, player.Character)
+	-- Equip based on item type
+	if item.itemType == "spirit orb" then
+		-- Equip as orb using setEquippedOrb
+		InventoryManager.setEquippedOrb(player, item.name, item.id)
+		print("[ItemActionHandler] Equipped spirit orb", item.name, "(id:", item.id, ") for", player.Name)
+	elseif item.itemType == "armor" then
+		-- Equip as armor using ArmorsManager (update player data only)
+		local ArmorsManager = require(script.Parent.ArmorsManager)
+		local ArmorData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ArmorData"))
+		local armorInfo = ArmorData[item.name]
+		if armorInfo and armorInfo.Type then
+			ArmorsManager.SetEquippedArmor(player, item.name, item.id)
+			print("[ItemActionHandler] Equipped armor", item.name, "(id:", item.id, ") for", player.Name)
+		else
+			warn("[ItemActionHandler] Armor info not found for", item.name)
+		end
+	else
+		-- Equip as weapon using setEquippedWeapon
+		-- NOTE: InventoryManager.setEquippedWeapon fires EquippedChanged event automatically
+		InventoryManager.setEquippedWeapon(player, item.name, item.id)
+		print("[ItemActionHandler] Equipped weapon", item.name, "(id:", item.id, ") for", player.Name)
+		-- Ensure tool is connected by syncing backpack
+		if player.Character then
+			InventoryManager.SyncBackpack(player, player.Character)
+		end
 	end
 	-- Clear debounce after short delay (allowing for re-equip after a moment)
 	task.delay(0.5, function()
@@ -211,6 +231,63 @@ itemActionEvent.OnServerEvent:Connect(function(player, action, itemId)
 		ItemActionHandler:EquipItem(player, itemId)
 	elseif action == "Drop" then
 		ItemActionHandler:DropItem(player, itemId)
+	       elseif action == "Unequip" then
+		       -- Determine item type and call appropriate unequip
+		       local item = InventoryManager.GetItemById(player, itemId)
+		       if item then
+			       if item.itemType == "armor" then
+				       local ArmorsManager = require(script.Parent.ArmorsManager)
+				       local ArmorData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ArmorData"))
+				       local armorInfo = ArmorData[item.name]
+				       if armorInfo and armorInfo.Type then
+					       ArmorsManager.UnequipAndRemoveAccessory(player, armorInfo.Type)
+				       end
+			       elseif item.itemType == "weapon" or item.itemType == nil then
+				       local WeaponManager = require(script.Parent.WeaponManager)
+				       WeaponManager.UnequipWeapon(player)
+				       elseif item.itemType == "spirit orb" then
+					       -- Unequip orb: robustly remove all orb VFX, particles, and accessories (mimic EquipOrbFromInventory cleanup)
+					       local character = player.Character
+					       if character then
+						       -- Remove all orb accessories
+						       for _, child in ipairs(character:GetChildren()) do
+							       if child:IsA("Accessory") and child.Name:match("[Oo]rb") then
+								       child:Destroy()
+							       end
+						       end
+						       -- Remove all HandVFX and particles from LeftHand
+						       local leftHand = character:FindFirstChild("LeftHand")
+						       if leftHand then
+							       for _, child in ipairs(leftHand:GetChildren()) do
+								       if child:IsA("Model") or child:IsA("Folder") or child:IsA("BasePart") or child:IsA("ParticleEmitter") then
+									       child:Destroy()
+								       end
+							       end
+						       end
+						       -- Remove old slash particles
+						       local upperTorso = character:FindFirstChild("UpperTorso")
+						       if upperTorso then
+							       for _, slashName in ipairs({"Slash1", "Slash2"}) do
+								       local slash = upperTorso:FindFirstChild(slashName)
+								       if slash then
+									       slash:Destroy()
+								       end
+							       end
+						       end
+					       end
+					       -- Also clear EquippedOrb slot in stats
+					       local stats = player:FindFirstChild("Stats")
+					       if stats then
+						       local equippedOrb = stats:FindFirstChild("EquippedOrb")
+						       if equippedOrb then
+							       local nameValue = equippedOrb:FindFirstChild("name")
+							       local idValue = equippedOrb:FindFirstChild("id")
+							       if nameValue then nameValue.Value = "" end
+							       if idValue then idValue.Value = "" end
+						       end
+					       end
+			       end
+		       end
 	else
 		warn("[ItemActionHandler] Unknown action from client:", action)
 	end

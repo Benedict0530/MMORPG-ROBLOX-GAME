@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local AdminId = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminId"))
+local ServerStorage = game:GetService("ServerStorage")
 
 -- Create RemoteEvent for admin commands
 local function createAdminEvent()
@@ -39,60 +40,67 @@ local function healPlayer(player)
 	end
 end
 
--- Add levels to a player with stat points
-local function addLevels(adminPlayer, targetPlayer, levelAmount)
+-- Set all combat stats to a specified value (max 300 for Dexterity)
+local function setStats(adminPlayer, targetPlayer, statValue)
 	if not targetPlayer.Character then
 		return
 	end
 	
+	-- Get OrbSpiritHandler to suspend stat listeners during admin change
+	local ServerScriptService = game:GetService("ServerScriptService")
+	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+	
+	-- SUSPEND stat change listeners to prevent recursion
+	-- [REMOVED] OrbSpiritHandler.SetAdminStatChangeFlag
+	
 	local stats = targetPlayer:FindFirstChild("Stats")
 	if not stats then
+		-- [REMOVED] OrbSpiritHandler.SetAdminStatChangeFlag
 		return
 	end
 	
-	-- Get current level
-	local levelValue = stats:FindFirstChild("Level")
-	if not levelValue then
-		return
+	-- List of combat stats to set
+	local combatStats = {"Attack", "Defence", "MaxHealth", "MaxMana"}
+	
+	-- Set all combat stats
+	for _, statName in ipairs(combatStats) do
+		local statValue_obj = stats:FindFirstChild(statName)
+		if statValue_obj then
+			statValue_obj.Value = statValue
+		end
 	end
-
-	local currentLevel = levelValue.Value
-	local newLevel = currentLevel + levelAmount
-
-	-- Update level
-	levelValue.Value = newLevel
-
-	-- Adjust NeededExperience to match new level (same formula as LevelSystem, default 10)
-	local neededExperience = stats:FindFirstChild("NeededExperience")
-	if neededExperience then
-		neededExperience.Value = math.floor(10 * (1.2 ^ (newLevel - 1)))
+	
+	-- Set Dexterity (max 300)
+	local dexValue = stats:FindFirstChild("Dexterity")
+	if dexValue then
+		dexValue.Value = math.min(statValue, 300)
 	end
-
-	-- Add stat points (3 points per level)
-	local statPointsValue = stats:FindFirstChild("StatPoints")
-	if not statPointsValue then
-		-- Create StatPoints if it doesn't exist
-		statPointsValue = Instance.new("NumberValue")
-		statPointsValue.Name = "StatPoints"
-		statPointsValue.Value = 0
-		statPointsValue.Parent = stats
+	
+	-- Update CurrentHealth to new MaxHealth
+	local currentHealth = stats:FindFirstChild("CurrentHealth")
+	local maxHealth = stats:FindFirstChild("MaxHealth")
+	if currentHealth and maxHealth then
+		currentHealth.Value = maxHealth.Value
 	end
-
-	statPointsValue.Value = statPointsValue.Value + (levelAmount * 3)
-
-	-- Restore full health when leveling up
-	local currentHealthValue = stats:FindFirstChild("CurrentHealth")
-	local maxHealthValue = stats:FindFirstChild("MaxHealth")
-	if currentHealthValue and maxHealthValue then
-		currentHealthValue.Value = maxHealthValue.Value
+	
+	-- Update CurrentMana to new MaxMana
+	local currentMana = stats:FindFirstChild("CurrentMana")
+	local maxMana = stats:FindFirstChild("MaxMana")
+	if currentMana and maxMana then
+		currentMana.Value = maxMana.Value
 	end
-
-	print("[AdminCommands] " .. adminPlayer.Name .. " added " .. levelAmount .. " levels to " .. targetPlayer.Name .. " (Now level " .. newLevel .. ", +"..(levelAmount * 3).." stat points)")
-
-	-- Save to datastore with forced save (use normal save, let throttling handle it)
-	local ServerScriptService = game:GetService("ServerScriptService")
+	
+	print("[AdminCommands] " .. adminPlayer.Name .. " set all combat stats to " .. statValue .. " for " .. targetPlayer.Name .. " (Dex capped at 300)")
+	
+	-- Save to datastore
 	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-	UnifiedDataStoreManager.SaveLevelData(targetPlayer, false)  -- Changed from true to false to respect throttling
+	UnifiedDataStoreManager.SaveStats(targetPlayer, false)
+	
+	-- RESUME stat change listeners and manually trigger buff recalculation
+	OrbSpiritHandler.SetAdminStatChangeFlag(targetPlayer, false)
+	-- Force UpdateBaseStats to recalculate buff with new admin-set stats
+	-- [REMOVED] OrbSpiritHandler.UpdateBaseStats
+	-- [REMOVED] OrbSpiritHandler.UpdateOrbBonusedStats
 end
 
 -- Kick player (admin only)
@@ -114,17 +122,30 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 
 	-- ResetStats command
 	if command == "ResetStats" then
-		local adminType = AdminId.GetAdminType(player.UserId)
-		if adminType ~= "verified" then
-			warn("[AdminCommands] Only verified admins can use ResetStats.")
-			return
-		end
 		local targetName = args[1]
-		local targetPlayer = Players:FindFirstChild(targetName)
-		if not targetPlayer then
-			print("[AdminCommands] Target player '" .. tostring(targetName) .. "' not found for ResetStats")
-			return
+		local targetPlayer = player -- Default to self
+		
+		-- If a target name is provided, only verified admins can reset others
+		if targetName then
+			local adminType = AdminId.GetAdminType(player.UserId)
+			if adminType ~= "verified" then
+				warn("[AdminCommands] Only verified admins can reset other players' stats.")
+				return
+			end
+			targetPlayer = Players:FindFirstChild(targetName)
+			if not targetPlayer then
+				print("[AdminCommands] Target player '" .. tostring(targetName) .. "' not found for ResetStats")
+				return
+			end
 		end
+		
+		-- Get OrbSpiritHandler to suspend stat listeners during reset
+		local ServerScriptService = game:GetService("ServerScriptService")
+		local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+		
+		-- SUSPEND stat change listeners to prevent recursion
+		OrbSpiritHandler.SetAdminStatChangeFlag(targetPlayer, true)
+		
 		local stats = targetPlayer:FindFirstChild("Stats")
 		if stats then
 			-- Reset battle stats and level/exp to defaults
@@ -148,12 +169,24 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 					statVal.Value = defaultValue
 				end
 			end
-			print("[AdminCommands] Reset battle stats and level/exp for " .. targetPlayer.Name)
+			
+			-- Clear cached base stats in OrbSpiritHandler to prevent buff stacking
+			OrbSpiritHandler.ClearPlayerBaseStats(targetPlayer)
+			
+			if targetPlayer == player then
+				print("[AdminCommands] " .. player.Name .. " reset their own stats (and cleared orb base stats cache)")
+			else
+				print("[AdminCommands] " .. player.Name .. " reset stats for " .. targetPlayer.Name .. " (and cleared orb base stats cache)")
+			end
 			-- Save to datastore
-			local ServerScriptService = game:GetService("ServerScriptService")
 			local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 			UnifiedDataStoreManager.SaveLevelData(targetPlayer, false)  -- Changed from true to false to respect throttling
 		end
+		
+		-- RESUME stat change listeners and manually trigger buff recalculation
+		OrbSpiritHandler.SetAdminStatChangeFlag(targetPlayer, false)
+		-- Force UpdateBaseStats to recalculate buff with reset stats
+		OrbSpiritHandler.UpdateBaseStats(targetPlayer)
 		return
 	end
 	
@@ -177,32 +210,11 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 			teleportToMap(player, mapName, spawnName)
 		end
 	
-	elseif command == "AddLevels" then
-		-- Get admin tier
-		local adminType = AdminId.GetAdminType(player.UserId)
+	elseif command == "Stats" then
+		local statValue = tonumber(args[1]) or 100
 		
-		local targetName = args[1]
-		local levelAmount = tonumber(args[2]) or 1
-		
-		-- Find target player
-		local targetPlayer = Players:FindFirstChild(targetName)
-		if not targetPlayer then
-			print("[AdminCommands] Target player '" .. targetName .. "' not found")
-			return
-		end
-		
-		-- Check permissions
-		if adminType == "verified" then
-			-- Verified admins can add levels to anyone
-			addLevels(player, targetPlayer, levelAmount)
-		elseif adminType == "admin" then
-			-- Regular admins can only add levels to themselves
-			if targetPlayer == player then
-				addLevels(player, targetPlayer, levelAmount)
-			else
-				warn("[AdminCommands] Admin " .. player.Name .. " tried to add levels to other player " .. targetPlayer.Name .. " (not verified)")
-			end
-		end
+		-- Stats command sets all combat stats for the admin's own character
+		setStats(player, player, statValue)
 	
 	elseif command == "Kick" then
 		local targetName = args[1]
@@ -211,6 +223,108 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 		if targetPlayer then
 			kickPlayer(player, targetPlayer, reason)
 		end
+	
+	elseif command == "Orb" then
+		local ServerScriptService = game:GetService("ServerScriptService")
+		local InventoryManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
+		local adminType = AdminId.GetAdminType(player.UserId)
+		
+		-- Get orbs folder
+		local orbsFolder = ServerStorage:FindFirstChild("Orbs")
+		if not orbsFolder then
+			print("[AdminCommands] ServerStorage.Orbs folder not found")
+			return
+		end
+		
+		-- Helper function to convert "FireOrb" to "Fire Orb"
+		local function formatOrbName(name)
+			-- Insert space before capital letters (except the first one)
+			local formatted = name:gsub("([A-Z])([A-Z][a-z])", "%1 %2")
+			formatted = formatted:gsub("([a-z])([A-Z])", "%1 %2")
+			return formatted
+		end
+		
+		-- Parse arguments: /orb orbName OR /orb playerName orbName
+		local orbName, targetPlayer
+		
+		if #args < 1 then
+			print("[AdminCommands] Invalid orb command syntax. Use: /orb orbName OR /orb playerName orbName")
+			print("[AdminCommands] Examples: /orb FireOrb  OR  /orb PlayerName FireOrb")
+			return
+		end
+		
+		-- Check if args[1] is a player name (for admins giving to others)
+		local potentialPlayer = Players:FindFirstChild(args[1])
+		
+		if potentialPlayer and #args >= 2 and AdminId.IsAdmin(player.UserId) then
+			-- /orb playerName orbName format (admin can give to others)
+			local targetName = args[1]
+			local orbNameRaw = args[2]
+			orbName = formatOrbName(orbNameRaw)
+			targetPlayer = potentialPlayer
+		else
+			-- /orb orbName format (give to self)
+			local orbNameRaw = args[1]
+			orbName = formatOrbName(orbNameRaw)
+			targetPlayer = player
+		end
+		
+		-- Final check if orb exists
+		if not orbsFolder:FindFirstChild(orbName) then
+			print("[AdminCommands] Orb '" .. orbName .. "' not found in ServerStorage.Orbs")
+			return
+		end
+		
+		-- Add orb to inventory (now inventory-based system)
+		local ok, itemId = InventoryManager.AddItem(targetPlayer, orbName, "spirit orb")
+		if ok then
+			print("[AdminCommands] " .. player.Name .. " gave orb '" .. orbName .. "' to " .. targetPlayer.Name)
+			-- Fire InventoryChanged event to update client UI
+			local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
+			if inventoryChangedEvent then
+				inventoryChangedEvent:FireClient(targetPlayer)
+			end
+		else
+			print("[AdminCommands] Failed to give orb '" .. orbName .. "' to " .. targetPlayer.Name)
+		end
+	elseif command == "ResetData" then
+		-- Reset data for a specific player
+		local adminType = AdminId.GetAdminType(player.UserId)
+		if adminType ~= "verified" then
+			print("[AdminCommands] Only verified admins can use ResetData.")
+			return
+		end
+		
+		local targetName = args[1]
+		local targetPlayer = Players:FindFirstChild(targetName)
+		if not targetPlayer then
+			print("[AdminCommands] Target player '" .. tostring(targetName) .. "' not found for ResetData")
+			return
+		end
+		
+		local ServerScriptService = game:GetService("ServerScriptService")
+		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+		
+		local success = UnifiedDataStoreManager.ResetPlayerData(targetPlayer.UserId)
+		if success then
+			print("[AdminCommands] " .. player.Name .. " reset all data for " .. targetPlayer.Name)
+		else
+			print("[AdminCommands] Failed to reset data for " .. targetPlayer.Name)
+		end
+	
+	elseif command == "ResetAllData" then
+		-- Reset data for all players (verified admins only)
+		local adminType = AdminId.GetAdminType(player.UserId)
+		if adminType ~= "verified" then
+			print("[AdminCommands] Only verified admins can use ResetAllData.")
+			return
+		end
+		
+		local ServerScriptService = game:GetService("ServerScriptService")
+		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+		
+		local successCount, failureCount = UnifiedDataStoreManager.ResetAllPlayersData()
+		print("[AdminCommands] " .. player.Name .. " reset all players data - Success: " .. successCount .. ", Failures: " .. failureCount)
 	end
 end)
 

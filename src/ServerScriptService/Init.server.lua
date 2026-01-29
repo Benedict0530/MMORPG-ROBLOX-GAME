@@ -3,9 +3,31 @@
 -- Requires and initializes all game systems from the Library folder
 -- All functionality is organized in Library/[Category]/[Module]
 
+
+-- === SERVER READY WAIT ===
+-- Wait for all critical services and assets to be available before initializing modules
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
+
+local function waitForDescendant(parent, name, timeout)
+	local t0 = tick()
+	while true do
+		local found = parent:FindFirstChild(name)
+		if found then return found end
+		if timeout and (tick() - t0) > timeout then return nil end
+		task.wait(0.05)
+	end
+end
+
+
+waitForDescendant(ReplicatedStorage, "Modules", 10)
+waitForDescendant(ServerScriptService, "Library", 10)
+waitForDescendant(ServerStorage, "Armor Accessories", 10)
+waitForDescendant(ServerStorage, "Orbs", 10)
+
+print("[Init] All critical services and assets loaded. Proceeding with module initialization...")
 
 -- === SETUP: CREATE REMOTE EVENTS ===
 
@@ -28,6 +50,74 @@ createRemoteEvent("AllocateStatPoint", ReplicatedStorage)
 createRemoteEvent("EnemyDamage", ReplicatedStorage)
 createRemoteEvent("PlayerRunning", ReplicatedStorage)
 createRemoteEvent("ShowDamageText", ReplicatedStorage)
+createRemoteEvent("ParalysisEvent", ReplicatedStorage)
+createRemoteEvent("KnockbackEvent", ReplicatedStorage)
+createRemoteEvent("ResumeAnimationEvent", ReplicatedStorage)
+createRemoteEvent("PlayDashSound", ReplicatedStorage)
+createRemoteEvent("PerformDash", ReplicatedStorage)
+
+-- === DASH HANDLER ===
+local PerformDashEvent = ReplicatedStorage:FindFirstChild("PerformDash")
+if PerformDashEvent then
+	PerformDashEvent.OnServerEvent:Connect(function(player, position)
+		-- Try to consume 2 mana (will be implemented after ManaManager loads)
+		task.defer(function()
+			-- Get ManaManager after it's loaded
+			local ManaManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("ManaManager"))
+			local SoundModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SoundModule"))
+			
+			-- Check and consume mana
+			if ManaManager.ConsumeMana(player, 2) then
+				-- Store original transparency and VFX states
+				local originalTransparency = {}
+				local originalVFXStates = {}
+				local character = player.Character
+				local humanoid = character and character:FindFirstChild("Humanoid")
+				
+				if character then
+					-- Store and disable transparency + all VFX
+					for _, instance in ipairs(character:GetDescendants()) do
+						if instance:IsA("BasePart") then
+							originalTransparency[instance] = instance.Transparency
+							instance.Transparency = 1
+						end
+					end
+					print("[Init] " .. player.Name .. " dashing - made transparent, all VFX disabled")
+					
+					-- Play dash sound in range around the player
+					SoundModule.playSoundInRange("Dash Sound Effect", position, "SFX", 50, false, 1)
+					print("[Init] Dash performed by " .. player.Name .. " - 2 mana consumed, sound played")
+					
+					-- Wait for dash duration (0.3 seconds) and restore visuals
+					task.wait(0.3)
+					
+					-- Restore transparency to original values
+					for part, transparency in pairs(originalTransparency) do
+						if part and part.Parent then
+							part.Transparency = transparency
+						end
+					end
+					
+					
+					print("[Init] " .. player.Name .. " dash ended - restored transparency and VFX")
+				end
+			else
+				print("[Init] Dash failed - insufficient mana for " .. player.Name)
+			end
+		end)
+	end)
+end
+
+-- === DASH SOUND HANDLER (Legacy - can be removed) ===
+local PlayDashSoundEvent = ReplicatedStorage:FindFirstChild("PlayDashSound")
+if PlayDashSoundEvent then
+	local SoundModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SoundModule"))
+	PlayDashSoundEvent.OnServerEvent:Connect(function(player, position)
+		-- Play dash sound in range around the player
+		SoundModule.playSoundInRange("Dash Sound Effect", position, "SFX", 50, false, 1)
+		print("[Init] Dash sound played at position: " .. tostring(position))
+	end)
+end
 
 -- === DATA MANAGEMENT SYSTEMS ===
 
@@ -58,7 +148,8 @@ else
 	error("[Init] Failed to load EnemyStatsDataStore: " .. tostring(err))
 end
 
--- === PLAYER SYSTEMS ===
+
+
 
 local StatsManager
 success, err = pcall(function()
@@ -69,6 +160,9 @@ if success then
 else
 	error("[Init] Failed to load StatsManager: " .. tostring(err))
 end
+
+-- Ensure ArmorsManager is loaded so PlayerAdded logic runs
+local ArmorsManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("ArmorsManager"))
 
 local LevelSystem
 success, err = pcall(function()
@@ -245,6 +339,16 @@ else
 	error("[Init] Failed to load PlayerNameDisplay: " .. tostring(err))
 end
 
+local OrbSpiritHandler
+success, err = pcall(function()
+	OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+end)
+if success then
+	print("[Init] ✓ OrbSpiritHandler loaded")
+else
+	error("[Init] Failed to load OrbSpiritHandler: " .. tostring(err))
+end
+
 -- === ENEMY SYSTEMS ===
 
 -- Load EnemiesModule if it exists
@@ -264,13 +368,69 @@ end
 
 -- Handle player join
 Players.PlayerAdded:Connect(function(player)
-	-- All data loading is handled by PlayerDataStore module via PlayerAdded event
-	-- All item loading is handled by InventoryManager module via PlayerAdded event
-	-- All mana initialization is handled by ManaManager module via PlayerAdded event
+	local InventoryManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
+	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+
+	-- Ensure respawn listener is set up for orb VFX/slash auto-equip
+	OrbSpiritHandler.SetupPlayerRespawnListener(player)
+
+	-- Auto-equip orb on join, EXCEPT if inventory is exactly the starter items (Twig and Normal Orb)
+	local function autoEquipOrbUnlessStarter()
+		local inventory = InventoryManager.GetInventoryWithEquippedStatus(player)
+		local isStarter = false
+		if #inventory == 2 then
+			local hasTwig, hasNormalOrb = false, false
+			for _, item in ipairs(inventory) do
+				if item.name == "Twig" and item.itemType == "weapon" then
+					hasTwig = true
+				elseif item.name == "Normal Orb" and item.itemType == "spirit orb" then
+					hasNormalOrb = true
+				end
+			end
+			if hasTwig and hasNormalOrb then
+				isStarter = true
+			end
+		end
+		if not isStarter then
+			for _, item in ipairs(inventory) do
+				if item.itemType == "spirit orb" then
+					InventoryManager.setEquippedOrb(player, item.name, item.id)
+					print("[Init] Auto-equipped orb for " .. player.Name .. ": " .. item.name)
+					OrbSpiritHandler.EquipOrbFromInventory(player)
+					break
+				end
+			end
+		end
+	end
+	player.CharacterAdded:Connect(function(character)
+		-- Wait for Humanoid to exist
+		local tries = 0
+		local humanoid = character:FindFirstChild("Humanoid")
+		while not humanoid and tries < 30 do
+			task.wait(0.1)
+			humanoid = character:FindFirstChild("Humanoid")
+			tries = tries + 1
+		end
+		-- Only auto-equip orb if not starter inventory
+		autoEquipOrbUnlessStarter()
+	end)
+	if player.Character then
+		local character = player.Character
+		local tries = 0
+		local humanoid = character:FindFirstChild("Humanoid")
+		while not humanoid and tries < 30 do
+			task.wait(0.1)
+			humanoid = character:FindFirstChild("Humanoid")
+			tries = tries + 1
+		end
+		autoEquipOrbUnlessStarter()
+	end
 end)
 
 -- Handle players who are already in the game (for fast reloads)
 for _, player in ipairs(Players:GetPlayers()) do
+	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+	OrbSpiritHandler.SetupPlayerRespawnListener(player)
 	-- Initialize inventory and mana for existing players
 	task.spawn(function()
 		task.wait(0.5) -- Wait for all modules to be ready
@@ -285,8 +445,7 @@ end
 
 -- Handle player disconnect
 Players.PlayerRemoving:Connect(function(player)
-	-- All saves are delegated to UnifiedDataStoreManager via its PlayerRemoving event
-	-- All cleanup is handled by individual modules
+	-- All saves are handled by PlayerDataStore. Only cleanup is handled here if needed.
 end)
 
 -- === UTILITY: Setup Collision Groups for Items ===
@@ -317,6 +476,7 @@ pcall(function() PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "Play
 pcall(function() PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "DeadEnemies", false) end)
 pcall(function() PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "Coins", false) end)
 pcall(function() PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "Items", false) end)
+pcall(function() PhysicsService:CollisionGroupSetCollidable("Players", "Enemies", false) end)
 -- Verify collision setup
 task.wait(0.1)
 local success, canCollide = pcall(function()
@@ -338,6 +498,18 @@ else
 	warn("[Init] ⚠️ Failed to load AdminCommandsHandler: " .. tostring(err))
 end
 
+-- === DUNGEON HANDLER ===
+local DungeonHandler
+local success, err = pcall(function()
+	DungeonHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("DungeonHandler"))
+end)
+if success and DungeonHandler and DungeonHandler.Init then
+	DungeonHandler.Init()
+	print("[Init] ✓ DungeonHandler initialized")
+else
+	warn("[Init] ⚠️ Failed to load DungeonHandler: " .. tostring(err))
+end
+
 -- === ITEM COLLECTION SETUP ===
 if ItemCollectionHandler then
 	ItemCollectionHandler.Initialize(UnifiedDataStoreManager, InventoryManager)
@@ -346,6 +518,15 @@ end
 -- === SERVER READY ===
 
 print("[Init] 🎮 SERVER READY - All systems initialized")
+
+-- Fire ServerReady RemoteEvent to all clients
+local serverReadyEvent = ReplicatedStorage:FindFirstChild("ServerReady")
+if not serverReadyEvent then
+	serverReadyEvent = Instance.new("RemoteEvent")
+	serverReadyEvent.Name = "ServerReady"
+	serverReadyEvent.Parent = ReplicatedStorage
+end
+serverReadyEvent:FireAllClients()
 
 -- Keep the script running
 while true do

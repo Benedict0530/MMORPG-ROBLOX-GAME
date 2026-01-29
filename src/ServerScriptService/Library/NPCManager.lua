@@ -17,7 +17,7 @@ local setupNPCs = {}
 -- Create collision group if it doesn't exist
 local function initCollisionGroups()
 	local success = pcall(function()
-		PhysicsService:CreateCollisionGroup(NPC_COLLISION_GROUP)
+		PhysicsService:RegisterCollisionGroup(NPC_COLLISION_GROUP)
 	end)
 	if success then
 		print("[NPCManager] Collision group 'Players' created successfully")

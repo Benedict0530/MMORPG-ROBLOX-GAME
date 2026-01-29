@@ -1,7 +1,7 @@
 -- PlayerNameDisplay.client.lua
 -- Client-side custom player name display with BillboardGui
 -- Uses a template frame from ReplicatedStorage
-
+local PlayerNameDisplay = {}
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
@@ -294,3 +294,4 @@ task.wait(2)
 Initialize()
 
 
+return PlayerNameDisplay

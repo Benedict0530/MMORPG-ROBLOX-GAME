@@ -104,50 +104,57 @@ function QuestDataStore.AcceptQuest(player, questId)
 		print("[QuestDataStore] ⚠️ Quests folder not found for", player.Name)
 		return false
 	end
-	
+
 	local questValue = questFolder:FindFirstChild("Quest_" .. questId)
+	local didChange = false
 	if not questValue then
 		-- Create new quest entry
 		questValue = Instance.new("Folder")
 		questValue.Name = "Quest_" .. questId
 		questValue.Parent = questFolder
-		
+
 		-- Status
 		local statusValue = Instance.new("StringValue")
 		statusValue.Name = "status"
 		statusValue.Value = "accepted"
 		statusValue.Parent = questValue
-		
+
 		-- Progress
 		local progressValue = Instance.new("IntValue")
 		progressValue.Name = "progress"
 		progressValue.Value = 0
 		progressValue.Parent = questValue
-		
+
 		-- Date accepted
 		local dateAcceptedValue = Instance.new("StringValue")
 		dateAcceptedValue.Name = "dateAccepted"
 		dateAcceptedValue.Value = os.date("%Y-%m-%d %H:%M:%S")
 		dateAcceptedValue.Parent = questValue
-		
+
 		-- Date completed (empty)
 		local dateCompletedValue = Instance.new("StringValue")
 		dateCompletedValue.Name = "dateCompleted"
 		dateCompletedValue.Value = ""
 		dateCompletedValue.Parent = questValue
-		
+
 		print("[QuestDataStore] ✅ Quest", questId, "accepted for", player.Name)
+		didChange = true
+	else
+		-- Quest already exists, just update status if needed
+		local statusValue = questValue:FindFirstChild("status")
+		if statusValue and statusValue.Value ~= "completed" then
+			statusValue.Value = "accepted"
+			print("[QuestDataStore] ✅ Quest", questId, "marked as accepted for", player.Name)
+			didChange = true
+		end
+	end
+
+	-- Mark quest data as pending for save if changed
+	if didChange then
+		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+		UnifiedDataStoreManager.MarkQuestDataPending(player.UserId)
 		return true
 	end
-	
-	-- Quest already exists, just update status if needed
-	local statusValue = questValue:FindFirstChild("status")
-	if statusValue and statusValue.Value ~= "completed" then
-		statusValue.Value = "accepted"
-		print("[QuestDataStore] ✅ Quest", questId, "marked as accepted for", player.Name)
-		return true
-	end
-	
 	return false
 end
 
@@ -158,27 +165,30 @@ function QuestDataStore.CompleteQuest(player, questId)
 		print("[QuestDataStore] ⚠️ Quests folder not found for", player.Name)
 		return false
 	end
-	
+
 	local questValue = questFolder:FindFirstChild("Quest_" .. questId)
 	if not questValue then
 		print("[QuestDataStore] ⚠️ Quest", questId, "not found for", player.Name)
 		return false
 	end
-	
+
 	local statusValue = questValue:FindFirstChild("status")
 	if statusValue then
 		statusValue.Value = "completed"
-		
+
 		-- Set completion date
 		local dateCompletedValue = questValue:FindFirstChild("dateCompleted")
 		if dateCompletedValue then
 			dateCompletedValue.Value = os.date("%Y-%m-%d %H:%M:%S")
 		end
-		
+
 		print("[QuestDataStore] ✅ Quest", questId, "completed for", player.Name)
+		-- Mark quest data as pending for save
+		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+		UnifiedDataStoreManager.MarkQuestDataPending(player.UserId)
 		return true
 	end
-	
+
 	return false
 end
 
@@ -204,19 +214,19 @@ function QuestDataStore.UpdateQuestProgressByEnemyType(player, questId, enemyTyp
 	if not questFolder then
 		return
 	end
-	
+
 	local questValue = questFolder:FindFirstChild("Quest_" .. questId)
 	if not questValue then
 		return
 	end
-	
+
 	-- Get the quest data to find which objective matches this enemy type
 	local NpcQuestData = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("NpcQuestData"))
 	local quest = NpcQuestData.GetQuest(questId)
 	if not quest or not quest.objectives then
 		return
 	end
-	
+
 	-- Find which objective matches this enemy type
 	local objectiveIndex = nil
 	for idx, objective in ipairs(quest.objectives) do
@@ -225,26 +235,30 @@ function QuestDataStore.UpdateQuestProgressByEnemyType(player, questId, enemyTyp
 			break
 		end
 	end
-	
+
 	if not objectiveIndex then
 		print("[QuestDataStore] ⚠️ No objective found for enemy type:", enemyType, "in quest", questId)
 		return
 	end
-	
+
 	-- Create or update the progress value for this specific objective
 	local progressValueName = "ObjectiveProgress_" .. objectiveIndex
 	local progressValue = questValue:FindFirstChild(progressValueName)
-	
+
 	if not progressValue then
 		progressValue = Instance.new("IntValue")
 		progressValue.Name = progressValueName
 		progressValue.Value = 0
 		progressValue.Parent = questValue
 	end
-	
+
 	-- Increment the progress
 	progressValue.Value = progressValue.Value + incrementAmount
 	print("[QuestDataStore] Quest", questId, "objective", objectiveIndex, "(", enemyType, ") progress updated to", progressValue.Value)
+
+	-- Mark quest data as pending for save
+	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+	UnifiedDataStoreManager.MarkQuestDataPending(player.UserId)
 end
 
 -- Update quest progress (legacy - for single objective quests)

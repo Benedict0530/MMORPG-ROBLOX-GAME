@@ -1,6 +1,6 @@
 -- CoinCollection.client.lua
 -- Handles E key input for nearby coin and item drop collection
-
+local CoinCollection = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -76,3 +76,4 @@ setupPickupButton()
 player.CharacterAdded:Connect(function(newCharacter)
 	character = newCharacter
 end)
+return CoinCollection

@@ -650,6 +650,297 @@ NpcQuestData.Quests = {
 		-- Quest status
 		status = "available",
 		questGiver = "Forest Guardian"
+	},
+	
+	[12] = {
+		questId = 12,
+		questName = "Frozen Beginning",
+		questIcon = "❄️",
+		description = "Clear out the Ice Gloop creatures",
+		npcName = "Ice Warden",
+		mapName = "Frozen Realm Entrance",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Ice Warden",
+				text = "Welcome to the Frozen Realm...\nBut I'm afraid you've arrived at a dark time."
+			},
+			{
+				npc = "Ice Warden",
+				text = "Ice Gloop creatures have invaded our frozen lands.\nCan you help us clear them out?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I'll clear the Ice Gloop creatures.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Ice Warden",
+					text = "Thank you, brave warrior!"
+				}
+			}
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 10 Ice Gloop Crushers",
+				enemyType = "Ice Gloop Crusher",
+				target = 10,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 150,
+			gold = 250
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Ice Warden"
+	},
+	
+	[13] = {
+		questId = 13,
+		questName = "Frozen Advance",
+		questIcon = "❄️",
+		description = "More Ice Gloop creatures are spreading",
+		npcName = "Ice Warden",
+		mapName = "Frozen Realm Entrance",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Ice Warden",
+				text = "Excellent work! But the infestation continues to spread.\nWe need a stronger push!"
+			},
+			{
+				npc = "Ice Warden",
+				text = "Can you defeat 20 of them this time?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I'm ready for more.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Ice Warden",
+					text = "Your strength is admirable!"
+				}
+			}
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 20 Ice Gloop Crushers",
+				enemyType = "Ice Gloop Crusher",
+				target = 20,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 200,
+			gold = 400
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Ice Warden"
+	},
+	
+	[14] = {
+		questId = 14,
+		questName = "Frozen Crisis",
+		questIcon = "❄️",
+		description = "The Ice Gloop infestation intensifies",
+		npcName = "Ice Warden",
+		mapName = "Frozen Realm Entrance",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Ice Warden",
+				text = "The situation grows dire!\nThe Ice Gloop creatures multiply at an alarming rate!"
+			},
+			{
+				npc = "Ice Warden",
+				text = "We must push back harder. Can you defeat 30 of them?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I won't let them consume the realm.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Ice Warden",
+					text = "You are our only hope!"
+				}
+			}
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 30 Ice Gloop Crushers",
+				enemyType = "Ice Gloop Crusher",
+				target = 30,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 400,
+			gold = 500
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Ice Warden"
+	},
+	
+	[15] = {
+		questId = 15,
+		questName = "Frozen Onslaught",
+		questIcon = "❄️",
+		description = "The final stand against the Ice Gloop invasion",
+		npcName = "Ice Warden",
+		mapName = "Frozen Realm Entrance",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Ice Warden",
+				text = "This is it... our final stand!\nThe Ice Gloop creatures have overrun nearly everything!"
+			},
+			{
+				npc = "Ice Warden",
+				text = "I need one last massive effort from you.\nCan you defeat 50 of them?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I'll do whatever it takes.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Ice Warden",
+					text = "For the Frozen Realm!"
+				}
+			}
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 50 Ice Gloop Crushers",
+				enemyType = "Ice Gloop Crusher",
+				target = 50,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 900,
+			gold = 1200
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Ice Warden"
+	},
+	
+	[16] = {
+		questId = 16,
+		questName = "The Frozen Mother",
+		questIcon = "❄️",
+		description = "Defeat the source of the Ice Gloop infestation",
+		npcName = "Ice Warden",
+		mapName = "Frozen Realm Entrance",
+		
+		-- NPC Dialogue sections
+		dialogue = {
+			{
+				npc = "Ice Warden",
+				text = "You've performed miracles, but there's one final threat...\nThe source of this infestation - the Ice Giant Gloop Crusher!"
+			},
+			{
+				npc = "Ice Warden",
+				text = "It's a towering monstrosity of ice and corruption.\nBut if we defeat it, the infestation will stop spreading.\nAre you ready for this ultimate challenge?"
+			}
+		},
+		
+		-- Player response options
+		responses = {
+			{
+				id = 1,
+				text = "I'll defeat it and free the Frozen Realm.",
+				type = "accept",
+				action = "acceptQuest",
+				nextDialogue = {
+					npc = "Ice Warden",
+					text = "Go now! The fate of our realm rests in your hands!"
+				}
+			}
+		},
+		
+		-- Completion dialogue (shown after quest is completed)
+		completionDialogue = {
+			npc = "Ice Warden",
+			text = "You've done the impossible! You've saved the Frozen Realm!\nYour legend will be sung in the ice halls for generations to come.\nYou are a true hero... but I fear there are still greater dangers ahead."
+		},
+		
+		-- Quest objectives
+		objectives = {
+			{
+				id = 1,
+				description = "Defeat 1 Ice Giant Gloop Crusher",
+				enemyType = "Ice Giant Gloop Crusher",
+				target = 1,
+				progress = 0,
+				completed = false
+			}
+		},
+		
+		-- Quest rewards
+		rewards = {
+			experience = 2000,
+			gold = 3000
+		},
+		
+		-- Quest status
+		status = "available",
+		questGiver = "Ice Warden"
 	}
 }
 
@@ -658,6 +949,7 @@ NpcQuestData.MapQuests = {
 	["Grimleaf Entrance"] = {1, 2, 3, 4, 5},
 	["Grimleaf 1"] = {6, 7, 8},
 	["Grimleaf Exit"] = {9, 10, 11},
+	["Frozen Realm Entrance"] = {12, 13, 14, 15, 16},
 	["Frozen Realm"] = 2,
 	-- Add more maps and their corresponding quests here
 }

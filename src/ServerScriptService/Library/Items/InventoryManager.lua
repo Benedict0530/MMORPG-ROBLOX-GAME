@@ -1,26 +1,25 @@
+
+-- Services
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+-- Modules
 local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+
+-- DataStore
 local inventoryStore = DataStoreService:GetDataStore("PlayerInventory")
 
+-- InventoryManager Table
 local InventoryManager = {}
 
--- Per-player equip lock to prevent overlapping equip/sync
-local equipLocks = {}
-local connectInProgress = {}
-
--- Table to track inventories in memory
-local playerInventories = {}
--- Table to track if we've already synced backpack for a player
-local syncedPlayers = {}
--- Counter for unique item IDs
-local itemIdCounter = 0
-
--- Table to track when inventory is loaded for each player
-local inventoriesLoaded = {}
+-- Internal State
+local equipLocks = {}           -- Per-player equip lock to prevent overlapping equip/sync
+local connectInProgress = {}    -- Per-player connection state
+local playerInventories = {}    -- Table to track inventories in memory
+local inventoriesLoaded = {}    -- Table to track when inventory is loaded for each player
+local itemIdCounter = 0         -- Counter for unique item IDs
 
 -- Default inventory (new format with IDs and itemType)
 local DEFAULT_INVENTORY = {
@@ -28,31 +27,35 @@ local DEFAULT_INVENTORY = {
 }
 
 -- Helper: Get a safe userId from player or fallback
+
 local function getUserId(player)
-	if typeof(player) == "Instance" and player:IsA("Player") then
-		return player.UserId
-	end
-	return tostring(player)
+	return (typeof(player) == "Instance" and player:IsA("Player")) and player.UserId or tostring(player)
 end
 
 
+
 local function generateUniqueItemId(itemName, player)
-	-- Use os.time, math.random, and player.UserId for uniqueness
 	local userId = player and getUserId(player) or "0"
-	return itemName .. "_" .. tostring(userId) .. "_" .. tostring(os.time()) .. "_" .. tostring(math.random(100000,999999))
+	return string.format("%s_%s_%d_%d", itemName, userId, os.time(), math.random(100000,999999))
 end
 
 
 -- Create a fresh default inventory and equipped info for a new player
+
 function InventoryManager.CreateStarterWeaponAndEquipped()
-	local id = generateUniqueItemId("Twig")
-	local item = { name = "Twig", id = id, itemType = "weapon" }
-	return { item }, { name = "Twig", id = id }
+	local twigId = generateUniqueItemId("Twig")
+	local twig = { name = "Twig", id = twigId, itemType = "weapon" }
+	local orbId = generateUniqueItemId("Normal Orb")
+	local normalOrb = { name = "Normal Orb", id = orbId, itemType = "spirit orb" }
+	-- Give both Twig and Normal Orb, and return both as equipped for auto-equip logic
+	-- Return equipped as a table of both items
+	return { twig, normalOrb }, { twig, normalOrb }
 end
 
 -- For compatibility, keep createDefaultInventory for migration/legacy
+
 local function createDefaultInventory()
-	local inventory, _ = InventoryManager.CreateStarterWeaponAndEquipped()
+	local inventory = select(1, InventoryManager.CreateStarterWeaponAndEquipped())
 	return inventory
 end
 
@@ -135,7 +138,7 @@ function InventoryManager.setEquippedWeapon(player, weaponName, itemId)
 	if idValue then idValue.Value = itemId end
 
 	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-	UnifiedDataStoreManager.SaveStats(player, true)
+	UnifiedDataStoreManager.SaveStats(player, false)
 
 	-- Remove all tools from player and character (backpack and hand)
 	for _, tool in ipairs(player:GetChildren()) do
@@ -384,11 +387,17 @@ function InventoryManager.AddItem(player, itemName, itemType)
 		end
 	end
 	
-	-- Default itemType to "weapon" if not provided, or try to get from WeaponData
-	if not itemType then
-		local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
-		local weaponStats = WeaponData.GetWeaponStats(itemName)
-		itemType = weaponStats and weaponStats.itemType or "weapon"
+	-- Validate and correct itemType: only allow "armor", "weapon", "spirit orb"
+	local validTypes = { ["armor"] = true, ["weapon"] = true, ["spirit orb"] = true }
+	if not itemType or not validTypes[itemType] then
+		local ArmorData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ArmorData"))
+		if ArmorData[itemName] and ArmorData[itemName].itemType == "armor" then
+			itemType = "armor"
+		else
+			local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
+			local weaponStats = WeaponData.GetWeaponStats(itemName)
+			itemType = weaponStats and weaponStats.itemType or "weapon"
+		end
 	end
 	
 	-- Create new item entry with unique ID and itemType
@@ -410,15 +419,15 @@ function InventoryManager.AddItem(player, itemName, itemType)
 		end
 	end
 	
-	-- Item added to inventory, trigger save
-	InventoryManager.SaveInventory(player, false) -- Throttled save
-	
-	-- Notify client that inventory has changed
+	-- Item added to inventory, trigger IMMEDIATE save
+	InventoryManager.SaveInventory(player, true) -- Force immediate save
+
+	-- Notify client that inventory has changed (always fire after data change)
 	local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
 	if inventoryChangedEvent then
 		inventoryChangedEvent:FireClient(player)
 	end
-	
+
 	return true, newItem.id
 end
 
@@ -429,7 +438,7 @@ function InventoryManager.RemoveItem(player, itemId)
 	for i, item in ipairs(playerInventories[userId]) do
 		if item.id == itemId then
 			table.remove(playerInventories[userId], i)
-			
+
 			-- Update capacity stat to reflect current inventory count
 			local stats = player:FindFirstChild("Stats")
 			if stats then
@@ -438,9 +447,16 @@ function InventoryManager.RemoveItem(player, itemId)
 					capacityValue.Value = #playerInventories[userId]
 				end
 			end
-			
-			-- Item removed from inventory, trigger save
-			InventoryManager.SaveInventory(player, false) -- Throttled save
+
+			   -- Item removed from inventory, trigger IMMEDIATE save
+			   InventoryManager.SaveInventory(player, true) -- Force immediate save
+
+			-- Notify client that inventory has changed (always fire after data change)
+			local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
+			if inventoryChangedEvent then
+				inventoryChangedEvent:FireClient(player)
+			end
+
 			return true
 		end
 	end
@@ -495,10 +511,19 @@ function InventoryManager.LoadInventory(player)
 	print("[InventoryManager] Loaded data from DataStore: " .. tostring(data) .. " (retries: " .. retries .. ")")
 	
 	if type(data) == "table" then
+	local ArmorData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ArmorData"))
 		playerInventories[userId] = migrateData(data)
 		print("[InventoryManager] ✅ Successfully loaded inventory with " .. #playerInventories[userId] .. " items")
 	elseif data == nil then
 		-- DataStore load failed - create default but mark as needing save
+			-- Default itemType detection: check ArmorData first, then WeaponData, then fallback
+			local itemType = nil
+			if ArmorData[itemName] and ArmorData[itemName].itemType == "armor" then
+				itemType = "armor"
+			else
+				local weaponStats = WeaponData.GetWeaponStats(itemName)
+				itemType = weaponStats and weaponStats.itemType or "weapon"
+			end
 		playerInventories[userId] = createDefaultInventory()
 		warn("[InventoryManager] ⚠️ DataStore load failed for " .. player.Name .. " - using default inventory")
 	else
@@ -579,25 +604,30 @@ function InventoryManager.SyncBackpack(player, character)
 		equippedItemId = equipped.id
 	end
 	
-	-- FIX: If no equipped weapon found but inventory has items, equip first item
-	if (not equippedWeaponName or equippedWeaponName == "") and #inventory > 0 then
-		equippedWeaponName = inventory[1].name
-		equippedItemId = inventory[1].id
-		-- Validate the item exists in inventory
-		local found = false
-		for _, item in ipairs(inventory) do
-			if item.id == equippedItemId then
-				found = true
-				break
-			end
-		end
-		-- If not found in inventory, use first item's ID instead
-		if not found then
-			equippedItemId = inventory[1].id
-		end
-		-- Update stats to reflect the equipped item
-		InventoryManager.setEquippedWeapon(player, equippedWeaponName, equippedItemId)
-	end
+		       -- FIX: If no equipped weapon found but inventory has items, equip first WEAPON in inventory (skip orbs)
+		       if (not equippedWeaponName or equippedWeaponName == "") and #inventory > 0 then
+			       -- Find the first weapon in inventory (skip spirit orbs)
+			       local foundWeapon = false
+			       for _, item in ipairs(inventory) do
+				       if item.itemType == "weapon" then
+					       equippedWeaponName = item.name
+					       equippedItemId = item.id
+					       foundWeapon = true
+					       break
+				       end
+			       end
+			       -- If no weapon found, DO NOT auto-equip any orb or any other item
+			       if not foundWeapon then
+				       print("[InventoryManager] No weapon found to auto-equip for " .. player.Name .. ". Skipping auto-equip (orbs will NOT be auto-equipped).")
+				       equippedWeaponName = nil
+				       equippedItemId = nil
+			       else
+				       -- Update stats to reflect the equipped item
+				       InventoryManager.setEquippedWeapon(player, equippedWeaponName, equippedItemId)
+			       end
+		       end
+
+			   -- (Auto-equip of spirit orbs is now disabled except by explicit player action)
 	local equippedTool = nil
 	if equippedWeaponName and equippedWeaponName ~= "" then
 		local baseWeaponName = equippedWeaponName:match("^([^_]+)") or equippedWeaponName
@@ -625,25 +655,38 @@ function InventoryManager.SyncBackpack(player, character)
 		end
 	end
 	
-	-- If equippedTool is nil, try to find any weapon from first inventory item as fallback
-	if not equippedTool and #inventory > 0 then
-		print("[InventoryManager] ⚠️ Fallback: No equipped tool found, trying first inventory item for " .. player.Name)
-		local firstItem = inventory[1]
-		local baseWeaponName = firstItem.name:match("^([^_]+)") or firstItem.name
-		local tool = weaponsFolder:FindFirstChild(baseWeaponName)
-		if tool then
-			local clone = tool:Clone()
-			clone.Parent = player
-			clone:SetAttribute("_ItemId", firstItem.id)
-			clone:SetAttribute("_OwnerUserId", player.UserId)
-			print("[InventoryManager] Fallback: Created weapon " .. clone.Name .. " from inventory")
-			task.wait(0.15)
-			if clone.Parent == player then
-				equippedTool = clone
-				equippedItemId = firstItem.id
-			end
-		end
-	end
+	       -- If equippedTool is nil, try to find any weapon from first inventory item as fallback
+	       if not equippedTool and #inventory > 0 then
+		       print("[InventoryManager] ⚠️ Fallback: No equipped tool found, trying first weapon from inventory for " .. player.Name)
+		       -- Find first WEAPON item (skip orbs)
+		       local firstWeapon = nil
+		       for _, item in ipairs(inventory) do
+			       if item.itemType == "weapon" then
+				       firstWeapon = item
+				       break
+			       end
+		       end
+		       if firstWeapon then
+			       local baseWeaponName = firstWeapon.name:match("^([^_]+)") or firstWeapon.name
+			       local tool = weaponsFolder:FindFirstChild(baseWeaponName)
+			       if tool then
+				       local clone = tool:Clone()
+				       clone.Parent = player
+				       clone:SetAttribute("_ItemId", firstWeapon.id)
+				       clone:SetAttribute("_OwnerUserId", player.UserId)
+				       print("[InventoryManager] Fallback: Created weapon " .. clone.Name .. " from inventory")
+				       task.wait(0.15)
+				       if clone.Parent == player then
+					       equippedTool = clone
+					       equippedItemId = firstWeapon.id
+				       end
+			       else
+				       print("[InventoryManager] Fallback: Weapon '" .. baseWeaponName .. "' not found in ReplicatedStorage.Weapons")
+			       end
+		       else
+			       print("[InventoryManager] Fallback: No weapon items found in inventory (only orbs?) - will NOT auto-equip any orb.")
+		       end
+	       end
 	if equippedTool then
 		task.wait(0.15)
 		if not equippedTool or equippedTool.Parent ~= player then
@@ -732,41 +775,63 @@ end
 
 -- Give starting items to player (only if new)
 function InventoryManager.GiveStartingItemsIfNew(player)
-	local inventory = InventoryManager.GetInventory(player)
-	local stats = player:FindFirstChild("Stats")
-	local equippedOk = false
-	if stats then
-		local equippedFolder = stats:FindFirstChild("Equipped")
-		if equippedFolder and equippedFolder:IsA("Folder") then
-			local idValue = equippedFolder:FindFirstChild("id")
-			if idValue and idValue.Value ~= "" then
-				equippedOk = true
-			end
-		end
-	end
-	if #inventory < 1 or not equippedOk then
-		-- Only create starter inventory/equipped if missing (should only happen for legacy data)
-		-- CRITICAL: NEVER directly overwrite playerInventories if it already has valid data
-		if #inventory < 1 then
-			local starterInventory, equipped = InventoryManager.CreateStarterWeaponAndEquipped()
-			local userId = player.UserId
-			playerInventories[userId] = starterInventory
-			if equipped and equipped.name and equipped.id then
-				InventoryManager.setEquippedWeapon(player, equipped.name, equipped.id)
-			end
-			InventoryManager.SaveInventory(player, true)
-			local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-			UnifiedDataStoreManager.SaveStats(player, true)
-		elseif not equippedOk then
-			-- Inventory exists but equipped is missing - just set equipped without replacing inventory
-			local equipped = InventoryManager.GetInventory(player)[1]
-			if equipped then
-				InventoryManager.setEquippedWeapon(player, equipped.name, equipped.id)
-			end
-		end
-	else
-		print("[InventoryManager] Player already has items and equipped, skipping starting item")
-	end
+	   -- Wait for inventory to be loaded
+	   local userId = player.UserId
+	   local maxWait, waited = 5, 0
+	   while not inventoriesLoaded[userId] and waited < maxWait do
+		   task.wait(0.1)
+		   waited = waited + 0.1
+	   end
+	   local inventory = InventoryManager.GetInventory(player)
+	   -- Wait for Stats and Equipped folder
+	   local stats = player:FindFirstChild("Stats")
+	   waited = 0
+	   while (not stats or not stats:FindFirstChild("Equipped")) and waited < maxWait do
+		   task.wait(0.1)
+		   stats = player:FindFirstChild("Stats")
+		   waited = waited + 0.1
+	   end
+	   -- Only give starter items if inventory is empty AND no weapon is equipped
+	   local hasWeaponEquipped = false
+	   if stats then
+		   local equippedFolder = stats:FindFirstChild("Equipped")
+		   if equippedFolder and equippedFolder:IsA("Folder") then
+			   local nameValue = equippedFolder:FindFirstChild("name")
+			   if nameValue and typeof(nameValue.Value) == "string" and nameValue.Value ~= "" then
+				   -- Check if equipped item is a weapon in inventory
+				   for _, item in ipairs(inventory) do
+					   if item.name == nameValue.Value and item.itemType == "weapon" then
+						   hasWeaponEquipped = true
+						   break
+					   end
+				   end
+			   end
+		   end
+	   end
+	   if #inventory < 1 and not hasWeaponEquipped then
+		   -- Only create starter inventory/equipped if missing (should only happen for new players)
+		   local starterInventory, equipped = InventoryManager.CreateStarterWeaponAndEquipped()
+		   playerInventories[userId] = starterInventory
+		   -- Add starter items to inventory first, then equip
+		   local starterWeapon, starterOrb = nil, nil
+		   for _, item in ipairs(starterInventory) do
+			   if item.itemType == "weapon" then
+				   starterWeapon = item
+			   elseif item.itemType == "spirit orb" then
+				   starterOrb = item
+			   end
+		   end
+		   -- Equip weapon first if present
+		   if starterWeapon then
+			   InventoryManager.setEquippedWeapon(player, starterWeapon.name, starterWeapon.id)
+		   end
+		   -- Do NOT auto-equip orb; just add to inventory
+		   InventoryManager.SaveInventory(player, true)
+		   local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+		   UnifiedDataStoreManager.SaveStats(player, false)
+	   else
+		   print("[InventoryManager] Player already has items and equipped weapon, skipping starting item to prevent item loss")
+	   end
 end
 
 -- Initialize player inventory (called from Init.server.lua for existing players)
@@ -778,6 +843,8 @@ function InventoryManager.InitializePlayer(player)
 	
 	-- Give starting items if new
 	InventoryManager.GiveStartingItemsIfNew(player)
+	
+	-- Auto-equip Normal Orb is now disabled per new requirements
 	
 	-- Sync backpack if character exists
 	if player.Character then
@@ -795,72 +862,35 @@ end
 -- Track last known character for each player to detect respawns
 local lastKnownCharacters = {}
 
--- Server-wide character monitor
+-- Server-wide character monitor (optimized)
 task.spawn(function()
 	print("[InventoryManager] 🌍 Starting server-wide character monitor")
 	while true do
 		task.wait(0.5)
-		
 		for _, player in ipairs(Players:GetPlayers()) do
 			local currentChar = player.Character
 			local lastChar = lastKnownCharacters[player.UserId]
-			
-			-- Detect respawn: character exists, is different from last known, and last was not nil
 			if currentChar and currentChar ~= lastChar and lastChar ~= nil then
-				print("[InventoryManager] ⚡⚡⚡ RESPAWN DETECTED for " .. player.Name)
+				print("[InventoryManager] ⚡ RESPAWN DETECTED for " .. player.Name)
 				lastKnownCharacters[player.UserId] = currentChar
-				
-				-- Trigger respawn sync
 				task.spawn(function()
 					print("[InventoryManager] 📌 Character loaded for " .. player.Name)
-					
-					local success, err = pcall(function()
-						-- Wait for humanoid to exist
-						local humanoid = currentChar:WaitForChild("Humanoid", 5)
-						if not humanoid then
-							warn("[InventoryManager] Humanoid not found for " .. player.Name .. " on respawn")
-							return
-						end
-						
+					local ok, err = pcall(function()
+						local humanoid = currentChar:FindFirstChild("Humanoid") or currentChar:WaitForChild("Humanoid", 3)
+						if not humanoid then warn("[InventoryManager] Humanoid not found for " .. player.Name) return end
 						print("[InventoryManager] ✅ Humanoid ready for " .. player.Name)
-						
-						-- Longer delay to ensure character and all parts are fully loaded
-						-- This is critical for weapon equipping to work properly
-						task.wait(0.5)
-						
-						-- FIXED: Don't reload from DataStore on respawn - keeps in-memory inventory intact
-						-- This prevents losing recently acquired items that haven't been saved yet
-						-- Inventory is already loaded on PlayerAdded and only updated when items are collected
+						task.wait(0.3)
 						print("[InventoryManager] ✅ Using existing inventory for respawn (no reload) for " .. player.Name)
-						
-						-- Cleanup old connections
 						local WeaponManager = require(script.Parent.WeaponManager)
-						if WeaponManager.CleanupPlayerTools then
-							print("[InventoryManager] 🧹 Calling CleanupPlayerTools for " .. player.Name)
-							WeaponManager.CleanupPlayerTools(player)
-							print("[InventoryManager] 🧹 CleanupPlayerTools complete for " .. player.Name)
-						else
-							print("[InventoryManager] ⚠️ CleanupPlayerTools not found in WeaponManager")
-						end
-
-						-- Sync backpack with proper error handling
-						print("[InventoryManager] 🎯 Syncing backpack for " .. player.Name)
-						local syncSuccess, syncErr = pcall(function()
+						if WeaponManager.CleanupPlayerTools then WeaponManager.CleanupPlayerTools(player) end
+						local syncOk, syncErr = pcall(function()
 							InventoryManager.SyncBackpack(player, currentChar)
 						end)
-						if syncSuccess then
-							print("[InventoryManager] ✅ SyncBackpack complete for " .. player.Name)
-						else
-							warn("[InventoryManager] ⚠️ SyncBackpack error for " .. player.Name .. ": " .. tostring(syncErr))
-						end
+						if not syncOk then warn("[InventoryManager] SyncBackpack error for " .. player.Name .. ": " .. tostring(syncErr)) end
 					end)
-					
-					if not success then
-						warn("[InventoryManager] ❌ Error in respawn handler for " .. player.Name .. ": " .. tostring(err))
-					end
+					if not ok then warn("[InventoryManager] Error in respawn handler for " .. player.Name .. ": " .. tostring(err)) end
 				end)
 			elseif currentChar and lastChar == nil then
-				-- First time tracking this character (initial spawn)
 				lastKnownCharacters[player.UserId] = currentChar
 			end
 		end
@@ -872,102 +902,51 @@ Players.PlayerAdded:Connect(function(player)
 	
 	-- Load and initialize inventory immediately
 	InventoryManager.LoadInventory(player)
-	-- IMPORTANT: Wait for LoadInventory to complete before GiveStartingItemsIfNew
 	task.wait(0.1)
 	InventoryManager.GiveStartingItemsIfNew(player)
-	
-	-- Handle initial character if it exists
 	if player.Character then
 		lastKnownCharacters[player.UserId] = player.Character
 		print("[InventoryManager] 🔄 Handling initial character for " .. player.Name)
-		
 		task.spawn(function()
-			local success, err = pcall(function()
-				-- Wait for humanoid
-				local humanoid = player.Character:WaitForChild("Humanoid", 5)
-				if not humanoid then
-					warn("[InventoryManager] Humanoid not found for " .. player.Name)
-					return
-				end
-				
-				task.wait(0.5)
-				
-				-- Cleanup old connections
+			local ok, err = pcall(function()
+				local humanoid = player.Character:FindFirstChild("Humanoid") or player.Character:WaitForChild("Humanoid", 3)
+				if not humanoid then warn("[InventoryManager] Humanoid not found for " .. player.Name) return end
+				task.wait(0.3)
 				local WeaponManager = require(script.Parent.WeaponManager)
-				if WeaponManager.CleanupPlayerTools then
-					WeaponManager.CleanupPlayerTools(player)
-				end
-				
-				-- Sync backpack
+				if WeaponManager.CleanupPlayerTools then WeaponManager.CleanupPlayerTools(player) end
 				print("[InventoryManager] 🎯 Syncing initial backpack for " .. player.Name)
 				InventoryManager.SyncBackpack(player, player.Character)
 				print("[InventoryManager] ✅ Initial SyncBackpack complete for " .. player.Name)
 			end)
-			
-			if not success then
-				warn("[InventoryManager] ❌ Error syncing initial character for " .. player.Name .. ": " .. tostring(err))
-			end
+			if not ok then warn("[InventoryManager] Error syncing initial character for " .. player.Name .. ": " .. tostring(err)) end
 		end)
 	else
-		-- Character doesn't exist yet, wait for it
 		player.CharacterAdded:Connect(function(newCharacter)
 			lastKnownCharacters[player.UserId] = newCharacter
 			print("[InventoryManager] 🔄 Character loaded for " .. player.Name .. " (via CharacterAdded)")
-			
 			task.spawn(function()
-				local success, err = pcall(function()
-					-- Wait for humanoid
-					local humanoid = newCharacter:WaitForChild("Humanoid", 5)
-					if not humanoid then
-						warn("[InventoryManager] Humanoid not found for " .. player.Name)
-						return
-					end
-					
-					task.wait(0.5)
-					
-					-- Cleanup old connections
+				local ok, err = pcall(function()
+					local humanoid = newCharacter:FindFirstChild("Humanoid") or newCharacter:WaitForChild("Humanoid", 3)
+					if not humanoid then warn("[InventoryManager] Humanoid not found for " .. player.Name) return end
+					task.wait(0.3)
 					local WeaponManager = require(script.Parent.WeaponManager)
-					if WeaponManager.CleanupPlayerTools then
-						WeaponManager.CleanupPlayerTools(player)
-					end
-					
-					-- Sync backpack
+					if WeaponManager.CleanupPlayerTools then WeaponManager.CleanupPlayerTools(player) end
 					print("[InventoryManager] 🎯 Syncing backpack for " .. player.Name)
 					InventoryManager.SyncBackpack(player, newCharacter)
 					print("[InventoryManager] ✅ SyncBackpack complete for " .. player.Name)
 				end)
-				
-				if not success then
-					warn("[InventoryManager] ❌ Error syncing character for " .. player.Name .. ": " .. tostring(err))
-				end
+				if not ok then warn("[InventoryManager] Error syncing character for " .. player.Name .. ": " .. tostring(err)) end
 			end)
 		end)
 	end
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-	-- CRITICAL: Validate inventory exists before saving to prevent data loss
-	local inventory = playerInventories[player.UserId]
-	if not inventory or type(inventory) ~= "table" then
-		warn("[InventoryManager] ⚠️ WARNING: Inventory is invalid for " .. player.Name .. " on disconnect - skipping save to prevent data loss")
-		-- Still cleanup, but don't attempt to save corrupted data
-		playerInventories[player.UserId] = nil
-		inventoriesLoaded[player.UserId] = nil
-		lastInventorySaveTime[player.UserId] = nil
-		pendingInventoryChanges[player.UserId] = nil
-		lastKnownCharacters[player.UserId] = nil
-		return
-	end
-	
-	-- Only save if inventory has valid data
-	if #inventory == 0 and inventoriesLoaded[player.UserId] then
-		warn("[InventoryManager] ⚠️ WARNING: Saving empty inventory for " .. player.Name .. " - possible data loss")
-	end
-	
-	-- Force save inventory through unified manager
-	UnifiedDataStoreManager.SaveInventory(player.UserId, inventory, true)
-	
-	-- Cleanup tracking
+	-- Force immediate inventory save before cleanup to prevent data loss
+	InventoryManager.SaveInventory(player, false)
+	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+	-- [REMOVED] OrbSpiritHandler.RemoveOrbStatBonuses
+	-- [REMOVED] OrbSpiritHandler.CleanupPlayerOrbData
 	playerInventories[player.UserId] = nil
 	inventoriesLoaded[player.UserId] = nil
 	lastInventorySaveTime[player.UserId] = nil
@@ -1008,10 +987,9 @@ inventoryEvent.OnServerInvoke = function(player)
 	-- Wait for inventory to be loaded if not already
 	local userId = player.UserId
 	local waitCount = 0
-	while not inventoriesLoaded[userId] and waitCount < 50 do
+	while not inventoriesLoaded[userId] and waitCount < 1000 do
 		waitCount = waitCount + 1
 		task.wait(0.1)
-		print("[InventoryManager] Waiting for inventory to load... attempt " .. waitCount)
 	end
 	
 	if not inventoriesLoaded[userId] then
@@ -1029,6 +1007,177 @@ inventoryEvent.OnServerInvoke = function(player)
 	
 	print("[InventoryManager] Returning inventory for " .. player.Name .. " with " .. #inventory .. " items")
 	return inventory
+end
+
+-- Get inventory with equipped status for UI display
+function InventoryManager.GetInventoryWithEquippedStatus(player)
+	if not player then return {} end
+	
+	local inventory = InventoryManager.GetInventory(player)
+	if not inventory or #inventory == 0 then return {} end
+	
+	-- Get equipped weapon and orb
+	local equippedWeapon = getEquippedWeapon(player)
+	local equippedOrb = getEquippedOrb(player)
+	
+	-- Add equipped flag to each item
+	local inventoryWithStatus = {}
+	for _, item in ipairs(inventory) do
+		local itemWithStatus = {
+			name = item.name,
+			id = item.id,
+			itemType = item.itemType,
+			equipped = false
+		}
+		
+		-- Check if this item is equipped
+		if item.itemType == "weapon" and equippedWeapon and equippedWeapon.id == item.id then
+			itemWithStatus.equipped = true
+		elseif item.itemType == "spirit orb" and equippedOrb and equippedOrb.id == item.id then
+			itemWithStatus.equipped = true
+		end
+		
+		table.insert(inventoryWithStatus, itemWithStatus)
+	end
+	
+	return inventoryWithStatus
+end
+
+-- Handle inventory requests from clients (with equipped status)
+local inventoryWithStatusEvent = ReplicatedStorage:FindFirstChild("GetPlayerInventoryWithStatus")
+if not inventoryWithStatusEvent then
+	inventoryWithStatusEvent = Instance.new("RemoteFunction")
+	inventoryWithStatusEvent.Name = "GetPlayerInventoryWithStatus"
+	inventoryWithStatusEvent.Parent = ReplicatedStorage
+end
+
+inventoryWithStatusEvent.OnServerInvoke = function(player)
+	if not player then 
+		print("[InventoryManager] Null player request for inventory with status!")
+		return {} 
+	end
+	
+	print("[InventoryManager] Player " .. player.Name .. " requesting inventory with equipped status")
+	
+	-- Wait for inventory to be loaded
+	local userId = player.UserId
+	local waitCount = 0
+	while not inventoriesLoaded[userId] and waitCount < 50 do
+		waitCount = waitCount + 1
+		task.wait(0.1)
+	end
+	
+	if not inventoriesLoaded[userId] then
+		warn("[InventoryManager] Inventory failed to load for " .. player.Name)
+		return {}
+	end
+	
+	return InventoryManager.GetInventoryWithEquippedStatus(player)
+end
+
+-- Helper: Get equipped orb data from folder structure
+local function getEquippedOrb(player)
+	local stats = player:FindFirstChild("Stats")
+	if not stats then return nil end
+	
+	local equippedOrbFolder = stats:FindFirstChild("EquippedOrb")
+	if not equippedOrbFolder or not equippedOrbFolder:IsA("Folder") then return nil end
+	
+	local nameValue = equippedOrbFolder:FindFirstChild("name")
+	local idValue = equippedOrbFolder:FindFirstChild("id")
+	
+	if not nameValue or not idValue then return nil end
+	
+	return {
+		name = nameValue.Value,
+		id = idValue.Value
+	}
+end
+
+-- -- Helper: Set equipped orb data in folder structure
+function InventoryManager.setEquippedOrb(player, orbName, itemId)
+	local userId = getUserId(player)
+	if equipLocks[userId] then
+		warn("[InventoryManager] Equip already in progress for " .. player.Name .. ", skipping.")
+		return
+	end
+	equipLocks[userId] = true
+	
+	-- Robustly wait for dependencies (Stats, EquippedOrb folder)
+	local stats, equippedOrbFolder
+	local maxWait, waited = 2, 0
+	while waited < maxWait do
+		stats = player:FindFirstChild("Stats")
+		if stats then
+			equippedOrbFolder = stats:FindFirstChild("EquippedOrb")
+		end
+		if stats and equippedOrbFolder and equippedOrbFolder:IsA("Folder") then
+			break
+		end
+		task.wait(0.1)
+		waited = waited + 0.1
+	end
+	
+	local function clearLocks()
+		equipLocks[userId] = nil
+	end
+	
+	if not stats then
+		print("[InventoryManager] FAILED: No Stats found for " .. player.Name .. " after wait")
+		clearLocks()
+		return
+	end
+	if not equippedOrbFolder or not equippedOrbFolder:IsA("Folder") then
+		print("[InventoryManager] FAILED: No EquippedOrb folder for " .. player.Name .. " after wait")
+		clearLocks()
+		return
+	end
+	local nameValue = equippedOrbFolder:FindFirstChild("name")
+	local idValue = equippedOrbFolder:FindFirstChild("id")
+	if nameValue then nameValue.Value = orbName end
+	if idValue then idValue.Value = itemId end
+	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+	UnifiedDataStoreManager.SaveStats(player, false)
+	print("[InventoryManager] Orb EQUIPPED for " .. player.Name .. ": " .. orbName .. " (id: " .. tostring(itemId) .. ")")
+	-- Fire EquippedOrbChanged event for client UI update
+	local equippedOrbChangedEvent = ReplicatedStorage:FindFirstChild("EquippedOrbChanged")
+	if not equippedOrbChangedEvent then
+		equippedOrbChangedEvent = Instance.new("RemoteEvent")
+		equippedOrbChangedEvent.Name = "EquippedOrbChanged"
+		equippedOrbChangedEvent.Parent = ReplicatedStorage
+	end
+	equippedOrbChangedEvent:FireClient(player)
+	-- Force server-side equip and log
+	   local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+	   -- Wait for character and required parts to exist before equipping VFX/accessory
+	   local maxWait, waited = 3, 0
+	   while (not player.Character or not player.Character:FindFirstChild("Humanoid")) and waited < maxWait do
+		   task.wait(0.1)
+		   waited = waited + 0.1
+	   end
+	   -- Optionally wait for LeftHand and UpperTorso if needed for VFX
+	   if player.Character then
+		   local lh, ut = player.Character:FindFirstChild("LeftHand"), player.Character:FindFirstChild("UpperTorso")
+		   local partWaited = 0
+		   while (not lh or not ut) and partWaited < 2 do
+			   task.wait(0.1)
+			   lh = player.Character:FindFirstChild("LeftHand")
+			   ut = player.Character:FindFirstChild("UpperTorso")
+			   partWaited = partWaited + 0.1
+		   end
+	   end
+	   local success = OrbSpiritHandler.EquipOrbFromInventory(player)
+	   if success then
+		   print("[InventoryManager] OrbSpiritHandler.EquipOrbFromInventory succeeded for " .. player.Name)
+	   else
+		   print("[InventoryManager] OrbSpiritHandler.EquipOrbFromInventory failed for " .. player.Name)
+	   end
+	clearLocks()
+end
+
+-- Get equipped orb for player
+function InventoryManager.GetEquippedOrb(player)
+	return getEquippedOrb(player)
 end
 
 return InventoryManager

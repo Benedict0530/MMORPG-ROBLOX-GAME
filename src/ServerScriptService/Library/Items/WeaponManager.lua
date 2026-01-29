@@ -11,6 +11,7 @@ local EnemyStatsDataStore = require(ServerScriptService:WaitForChild("Library"):
 local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
 local SoundModule = require(ReplicatedStorage.Modules.SoundModule)
 local PVPHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PVPHandler"))
+local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
 
 -- Create RemoteEvent for showing enemy damage text on clients
 local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
@@ -30,14 +31,10 @@ local blockSwingEvent = {}
 WeaponManager.blockSwingEvent = blockSwingEvent
 
 -- Helper function to check if target is in front of or beside the attacker
--- Uses a 120-degree cone (front + sides)
+-- Uses a 360-degree cone (all directions)
 local function isTargetInAttackCone(attackerRoot, targetRoot)
-	local attackDirection = attackerRoot.CFrame.LookVector  -- Forward direction of attacker
-	local directionToTarget = (targetRoot.Position - attackerRoot.Position).Unit
-	
-	-- Dot product: if >= 0.5, target is within ~60 degrees on either side (120 degree total cone)
-	local dotProduct = attackDirection:Dot(directionToTarget)
-	return dotProduct >= 0.5  -- Approximately 60 degrees from center
+	-- 360 degree detection - always return true (any direction is valid)
+	return true
 end
 
 -- Helper function to cast a ray and check if it hits the target
@@ -87,6 +84,64 @@ local function getOrCreateEnemyHealth(enemyModel, enemyStats)
 	return enemyHealth
 end
 
+-- Orb type color table (RGB values for highlight effect)
+local orbTypeColors = {
+	Fire = Color3.fromRGB(255, 102, 51),
+	Wind = Color3.fromRGB(0, 85, 0),
+	Water = Color3.fromRGB(0, 0, 255),
+	Earth = Color3.fromRGB(83, 28, 0),
+	Shadow = Color3.fromRGB(170, 0, 255),
+	Dark = Color3.fromRGB(0, 0, 0),
+	Light = Color3.fromRGB(255, 255, 255),
+	Radiant = Color3.fromRGB(255, 250, 110),
+}
+
+-- Extract the orb type from orb name (e.g., "Dark Orb" -> "Dark")
+local function getOrbType(orbName)
+	return orbName:match("^(.+)%s+Orb$") or orbName
+end
+
+-- Apply highlight effect to any target (enemy or player) with spirit orb color
+-- The highlight fills the target with the orb color for 0.2 seconds
+local function applyOrbHighlightToTarget(targetModel, orbName)
+	if not targetModel or not orbName or orbName == "" then
+		return
+	end
+
+	local orbType = getOrbType(orbName)
+	local highlightColor = orbTypeColors[orbType]
+	
+	if not highlightColor then
+		return
+	end
+
+	-- Get all parts in the target model and apply highlight
+	local function highlightPart(part)
+		if not part:IsA("BasePart") then
+			return
+		end
+		
+		-- Store original color
+		local originalColor = part.Color
+		
+		-- Apply highlight color
+		part.Color = highlightColor
+		
+		-- Restore after 0.2 seconds
+		task.wait(0.2)
+		part.Color = originalColor
+	end
+
+	-- Apply highlight to all parts (run in parallel for better effect)
+	for _, part in ipairs(targetModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			task.spawn(function()
+				highlightPart(part)
+			end)
+		end
+	end
+end
+
 -- Modular attack logic for each weapon
 function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 	print("[WeaponManager] PerformAttack called for player=" .. tostring(player) .. ", tool=" .. tostring(tool) .. ", weaponSpeed=" .. tostring(weaponSpeed))
@@ -131,6 +186,18 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 	end
 
 	print("[WeaponManager] Attack proceeding for " .. player.Name .. " with tool " .. tool.Name)
+
+	-- Trigger slash particle effects if player has spirit equipped
+	task.spawn(function()
+		OrbSpiritHandler.TriggerSlashParticles(player)
+	end)
+
+	-- Extend HitPart if player has spirit orb equipped
+	if OrbSpiritHandler.HasSpiritOrb(player) then
+		OrbSpiritHandler.ExtendWeaponHitPart(hitPart)
+	else
+		OrbSpiritHandler.ResetWeaponHitPart(hitPart)
+	end
 
 	local hitEnemies = {} -- Track which enemies have been hit this attack
 	local deadEnemies = {} -- Track dead enemies to prevent further damage
@@ -195,6 +262,16 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 			local currentDamage = enemyModel:GetAttribute("PlayerDamageTracker_" .. player.UserId) or 0
 			enemyModel:SetAttribute("PlayerDamageTracker_" .. player.UserId, currentDamage + damage)
 			
+			-- Apply spirit orb highlight effect if player has spirit orb equipped
+			if OrbSpiritHandler.HasSpiritOrb(player) then
+				local orbName = OrbSpiritHandler.GetEquippedOrbName(player)
+				if orbName and orbName ~= "" then
+					task.spawn(function()
+						applyOrbHighlightToTarget(enemyModel, orbName)
+					end)
+				end
+			end
+			
 			SoundModule.playSoundInRange("Hit", enemyRoot.Position, "SFX", 100, false, 1)
 			damageEvent:FireAllClients(enemyModel, damage, isCritical, true)
 			print("[WeaponManager] " .. player.Name .. " hit enemy '" .. enemyName .. "' for " .. tostring(damage) .. " damage (crit: " .. tostring(isCritical) .. ") | Enemy health: " .. tostring(enemyHealth.Value) .. "/" .. tostring(oldHealth))
@@ -211,7 +288,7 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 
 	local touchedConn = hitPart.Touched:Connect(onTouched)
 	-- Only allow hit registration for a very short window (matches animation hit frame)
-	local HIT_WINDOW = 0.1 -- seconds, should match the animation marker timing
+	local HIT_WINDOW = 0.5 -- seconds, should match the animation marker timing
 	task.delay(HIT_WINDOW, function()
 		if touchedConn then touchedConn:Disconnect() end
 	end)
@@ -333,7 +410,16 @@ function WeaponManager.ConnectTool(tool, player)
 
 	toolConnections[uniqueToolId] = connection
 	table.insert(playerToolIds[player.UserId], uniqueToolId)
-	print("[WeaponManager] Connected tool '" .. tool.Name .. "' for player " .. player.Name .. " (toolId: " .. uniqueToolId .. ")")
+	   print("[WeaponManager] Connected tool '" .. tool.Name .. "' for player " .. player.Name .. " (toolId: " .. uniqueToolId .. ")")
+
+	   -- Fire WeaponConnected RemoteEvent to client to signal weapon is ready
+	   local weaponConnectedEvent = ReplicatedStorage:FindFirstChild("WeaponConnected")
+	   if not weaponConnectedEvent then
+		   weaponConnectedEvent = Instance.new("RemoteEvent")
+		   weaponConnectedEvent.Name = "WeaponConnected"
+		   weaponConnectedEvent.Parent = ReplicatedStorage
+	   end
+	   weaponConnectedEvent:FireClient(player, tool.Name)
 end
 
 -- Cleanup: Called when player respawns or disconnects
@@ -341,6 +427,31 @@ function WeaponManager.CleanupPlayerTools(player)
 	if not player then return end
 	cleanupPlayerToolConnections(player)
 	playerToolIds[player.UserId] = nil
+end
+
+-- Unequip weapon: clear equipped slot and remove tool from character/backpack
+function WeaponManager.UnequipWeapon(player)
+	local stats = player:FindFirstChild("Stats")
+	if not stats then return end
+	local equipped = stats:FindFirstChild("Equipped")
+	if not equipped then return end
+	local idValue = equipped:FindFirstChild("id")
+	local nameValue = equipped:FindFirstChild("name")
+	local equippedId = idValue and idValue.Value or ""
+	local equippedName = nameValue and nameValue.Value or ""
+	if idValue then idValue.Value = "" end
+	if nameValue then nameValue.Value = "" end
+	-- Remove tool from character and backpack
+	if equippedName ~= "" then
+		for _, container in ipairs({player.Backpack, player.Character}) do
+			if container then
+				local tool = container:FindFirstChild(equippedName)
+				if tool and tool:IsA("Tool") then
+					tool:Destroy()
+				end
+			end
+		end
+	end
 end
 
 return WeaponManager

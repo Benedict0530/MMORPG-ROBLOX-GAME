@@ -26,6 +26,9 @@
       "Init": {
         "$path": "src/ServerScriptService/Init.server.lua"
       },
+      "ChatBillboardHandler": {
+        "$path": "src/ServerScriptService/ChatBillboardHandler.server.lua"
+      },
       "Library": {
         "$className": "Folder",
         "$path": "src/ServerScriptService/Library"

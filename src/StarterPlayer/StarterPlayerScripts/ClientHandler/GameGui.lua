@@ -1,12 +1,20 @@
+local GameGui = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local WeaponData = require(ReplicatedStorage.Modules.WeaponData)
 
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+
+-- Disable the default Roblox leaderboard (PlayerList)
+pcall(function()
+	game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
+end)
 
 -- Hide default Roblox health bar immediately
 pcall(function()
@@ -35,6 +43,7 @@ local currentMana
 local experience
 local neededExperience
 local previousHealth
+local cachedBaseStats = {} -- Cache base stats locally to avoid fallback issues
 
 -- ============ UI ELEMENTS ============
 local gameGui
@@ -114,24 +123,19 @@ local function updateExperienceBar()
 end
 
 -- ============ STATSINFO UPDATE FUNCTIONS ============
+
 local function updateStatsInfoDisplay()
 	if not stats or not gameGuiFrame then return end
-	
+	print("[GameGui] Updating StatsInfo display...")
+	task.wait(0.05)
 	local statsInfo = gameGuiFrame:FindFirstChild("StatsInfo")
 	if not statsInfo then return end
-	
 	local textsFolder = statsInfo:FindFirstChild("Background")
-	if textsFolder then
-		textsFolder = textsFolder:FindFirstChild("Texts")
-	end
-	
+	if textsFolder then textsFolder = textsFolder:FindFirstChild("Texts") end
 	local statsValueFolder = statsInfo:FindFirstChild("Background")
-	if statsValueFolder then
-		statsValueFolder = statsValueFolder:FindFirstChild("StatsValue")
-	end
-	
+	if statsValueFolder then statsValueFolder = statsValueFolder:FindFirstChild("StatsValue") end
 	if not textsFolder or not statsValueFolder then return end
-	
+
 	-- Update Texts folder (stat labels)
 	local healthText = textsFolder:FindFirstChild("Health")
 	local manaText = textsFolder:FindFirstChild("Mana")
@@ -139,17 +143,19 @@ local function updateStatsInfoDisplay()
 	local defenceText = textsFolder:FindFirstChild("Defence")
 	local dexterityText = textsFolder:FindFirstChild("Dexterity")
 	local statPointsText = textsFolder:FindFirstChild("Stat Points")
-	
+
 	-- Update StatsValue folder (stat values)
 	local healthValue = statsValueFolder:FindFirstChild("Health")
 	local manaValue = statsValueFolder:FindFirstChild("Mana")
 	local attackValue = statsValueFolder:FindFirstChild("Attack")
 	local defenceValue = statsValueFolder:FindFirstChild("Defence")
 	local damageValue = statsValueFolder:FindFirstChild("Damage")
-	local criticalValue = statsValueFolder:FindFirstChild("Critical")
+	local criticalChanceValue = statsValueFolder:FindFirstChild("CriticalChance")
+	local criticalDamageValue = statsValueFolder:FindFirstChild("CriticalDamage")
 	local statPointsValue = statsValueFolder:FindFirstChild("Stat Points")
 	local dexterityValue = statsValueFolder:FindFirstChild("Dexterity")
-	
+	local defenseOutputValue = statsValueFolder:FindFirstChild("DefenseOutput")
+
 	-- Get stat objects from player stats
 	local maxHealthStat = stats:FindFirstChild("MaxHealth")
 	local currentHealthStat = stats:FindFirstChild("CurrentHealth")
@@ -160,51 +166,116 @@ local function updateStatsInfoDisplay()
 	local dexterityStat = stats:FindFirstChild("Dexterity")
 	local statPointsStat = stats:FindFirstChild("StatPoints")
 	local resetPointsStat = stats:FindFirstChild("ResetPoints")
-	
-	-- Update text displays
+
+	-- Show only base stats
 	if healthText and maxHealthStat and currentHealthStat then healthText.Text = "Health:" end
-	if healthValue and maxHealthStat and currentHealthStat then healthValue.Text = tostring(currentHealthStat.Value) .. "/" .. tostring(maxHealthStat.Value) end
-	
-	if manaText and maxManaStat and currentManaStat then manaText.Text = "Mana:" end
-	if manaValue and maxManaStat and currentManaStat then manaValue.Text = tostring(currentManaStat.Value) .. "/" .. tostring(maxManaStat.Value) end
-	
-	if attackText and attackStat then attackText.Text = "Attack:" end
-	if attackValue and attackStat then attackValue.Text = tostring(attackStat.Value) end
-	
-	if defenceText and defenceStat then defenceText.Text = "Defence:" end
-	if defenceValue and defenceStat then defenceValue.Text = tostring(defenceStat.Value) end
-	
-	if dexterityText and dexterityStat then dexterityText.Text = "Dexterity:" end
-	if dexterityValue and dexterityStat then dexterityValue.Text = tostring(dexterityStat.Value) end
-	
-	-- Damage range: min (base * 0.4) to max (base * 2 * 1.6 = base * 3.2) to match server logic
-	if damageValue and attackStat then
-		local attackDamage = attackStat.Value
-		local weaponDamage = 0
-		-- Check for equipped weapon and get its damage
-		if character then
-			local equippedTool = character:FindFirstChildOfClass("Tool")
-			if equippedTool then
-				local weaponStats = WeaponData.GetWeaponStats(equippedTool.Name)
-				if weaponStats and weaponStats.damage then
-					weaponDamage = weaponStats.damage
-				end
-			end
-		end
-		local base = attackDamage + weaponDamage
-		local minDamage = math.floor(base * 0.4)
-		local maxDamage = math.floor(base * 3.2)
-		damageValue.Text = "Damage: " .. formatNumberWithCommas(minDamage) .. " - " .. formatNumberWithCommas(maxDamage)
+	if healthValue and maxHealthStat and currentHealthStat then 
+		healthValue.Text = tostring(currentHealthStat.Value) .. "/" .. tostring(maxHealthStat.Value) 
 	end
-	
+	if manaText and maxManaStat and currentManaStat then manaText.Text = "Mana:" end
+	if manaValue and maxManaStat and currentManaStat then 
+		manaValue.Text = tostring(currentManaStat.Value) .. "/" .. tostring(maxManaStat.Value) 
+	end
+	if attackText and attackStat then attackText.Text = "Attack:" end
+	if attackValue and attackStat then 
+		attackValue.Text = tostring(attackStat.Value)
+	end
+	if defenceText and defenceStat then defenceText.Text = "Defence:" end
+	if defenceValue and defenceStat then 
+		defenceValue.Text = tostring(defenceStat.Value)
+	end
+	if dexterityText and dexterityStat then dexterityText.Text = "Dexterity:" end
+	if dexterityValue and dexterityStat then 
+		dexterityValue.Text = tostring(dexterityStat.Value)
+	end
 	if statPointsText and statPointsStat then statPointsText.Text = "Stat Points:" end
 	if statPointsValue and statPointsStat then statPointsValue.Text = tostring(statPointsStat.Value) end
-	
-	-- Critical chance is based on Dexterity: every 3 Dexterity = 1% critical chance
-	if criticalValue and dexterityStat then
-		local criticalChance = (dexterityStat.Value / 3)
-		criticalValue.Text = "Critical Chance: " .. string.format("%.2f", criticalChance) .. "%"
+
+	-- Calculate and display Defense Output (matches server logic)
+	if defenseOutputValue and attackStat and defenceStat then
+		-- Calculate equipped armor defense (client-side, same as server)
+		local function getArmorDef(slotName)
+			local slot = stats:FindFirstChild(slotName)
+			if slot and slot:IsA("Folder") then
+				local nameValue = slot:FindFirstChild("name")
+				local armorName = nameValue and nameValue.Value or ""
+				local ArmorData = require(game:GetService("ReplicatedStorage").Modules.ArmorData)
+				if armorName ~= "" and ArmorData[armorName] and ArmorData[armorName].Defense then
+					return ArmorData[armorName].Defense
+				end
+			end
+			return 0
+		end
+		local armorDefense = getArmorDef("EquippedHelmet") + getArmorDef("EquippedSuit") + getArmorDef("EquippedLegs") + getArmorDef("EquippedShoes")
+		local defence = defenceStat.Value or 0
+		local defenseOutput = 0
+		if armorDefense > 0 and defence > 0 then
+			defenseOutput = math.floor(math.sqrt(defence * armorDefense) / 1.5)
+		end
+		defenseOutputValue.Text = formatNumberWithCommas(defenseOutput)
 	end
+
+	       -- Calculate orb multipliers (client-side, for display only)
+	       local attackMult, defenceMult = 1, 1
+	       local critChanceMult, critDamageMult = 1, 1
+	       local equippedOrb = stats:FindFirstChild("EquippedOrb")
+	       local orbMultiplierLabel = statsInfo:FindFirstChild("OrbBonus")
+	       if equippedOrb and equippedOrb:IsA("Folder") then
+		       local orbNameValue = equippedOrb:FindFirstChild("name")
+		       local orbName = orbNameValue and orbNameValue.Value or ""
+		       if orbName ~= "" then
+			       local OrbData = require(game:GetService("ReplicatedStorage").Modules.OrbData)
+			       local orbData = OrbData.GetOrbData(orbName)
+			       if orbData and orbData.stats then
+				       attackMult = orbData.stats.Attack or 1
+				       defenceMult = orbData.stats.Defence or 1
+				       critChanceMult = orbData.stats.CriticalChance or 1
+				       critDamageMult = orbData.stats.CriticalDamage or 1
+			       end
+		       end
+	       end
+
+		       -- Calculate and display deterministic damage and crit chance (client-side, for display only)
+		       if damageValue or criticalChanceValue or criticalDamageValue then
+			       -- Find equipped weapon (Tool in character)
+			       local equippedWeaponName = nil
+			       if character then
+				       for _, child in ipairs(character:GetChildren()) do
+					       if child:IsA("Tool") then
+						       equippedWeaponName = child.Name
+						       break
+					       end
+				       end
+			       end
+			       local weaponStats = equippedWeaponName and WeaponData.GetWeaponStats(equippedWeaponName) or nil
+			       local weaponDamage = weaponStats and weaponStats.damage or 0
+			       local baseAttack = attackStat and attackStat.Value or 1
+			       local dexterity = dexterityStat and dexterityStat.Value or 0
+			       -- Apply orb multipliers
+			       local effectiveAttack = math.floor(baseAttack * attackMult)
+			       -- Damage formula: Weapon Damage × (1 + effectiveAttack/100)
+			       local baseDamage = math.floor(weaponDamage * (1 + (effectiveAttack / 100)))
+			       -- Crit chance: (dexterity / 3) * critChanceMult
+			       local critChance = (dexterity / 3) * critChanceMult
+			       if critChance > 100 then critChance = 100 end
+			       -- Crit multiplier from stat (default 50% = 1.5x), then apply orb crit damage multiplier
+			       local critDmgStat = stats:FindFirstChild("CriticalDamage")
+			       local critMult = 1.5
+			       if critDmgStat and critDmgStat.Value then
+				       critMult = 1 + (critDmgStat.Value / 100)
+			       end
+			       critMult = critMult * critDamageMult
+			       local critDamage = math.floor(baseDamage * critMult)
+			       if damageValue then
+				       damageValue.Text = formatNumberWithCommas(baseDamage)
+			       end
+			       if criticalChanceValue then
+				       criticalChanceValue.Text = string.format("%.1f%%", critChance)
+			       end
+			       if criticalDamageValue then
+				       criticalDamageValue.Text = string.format("+ %s%%", formatNumberWithCommas(math.floor((critMult-1)*100)))
+			       end
+		       end
 end
 
 -- ============ DAMAGE TEXT DISPLAY ============
@@ -388,11 +459,15 @@ local function getUIElements()
 end
 
 local function getStatValues()
-	stats = player:WaitForChild("Stats", WAIT_TIMEOUT)
-	if not stats then 
-		warn("Stats folder not found!")
-		return false
-	end
+		while true do
+			stats = player:FindFirstChild("Stats")
+			if stats then break end
+			player.ChildAdded:Wait()
+		end
+		if not stats then 
+			warn("Stats folder not found!")
+			return false
+		end
 	
 	money = stats:WaitForChild("Money", WAIT_TIMEOUT)
 	level = stats:WaitForChild("Level", WAIT_TIMEOUT)
@@ -433,7 +508,12 @@ end
 local function setupCharacter(newCharacter)
 	-- Cleanup old connections
 	disconnectAll()
-	
+
+	-- Always hide default Roblox health bar on character spawn
+	pcall(function()
+		game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+	end)
+
 	character = newCharacter
 	
 	-- Get UI elements
@@ -451,6 +531,36 @@ local function setupCharacter(newCharacter)
 	
 	-- Get stat values
 	if not getStatValues() then return end
+	
+	-- Wait for orb to be equipped before first stats display
+	-- This ensures orb multipliers are available when UI first renders
+	print("[GameGui] Waiting for orb to be equipped before first stats display...")
+	local orbEquipWaitStart = tick()
+	while true do
+		local isOrbEquipped = false
+		local success = pcall(function()
+			local isOrbEquippedFunction = ReplicatedStorage:FindFirstChild("IsOrbEquippedFunction")
+			if not isOrbEquippedFunction then
+				isOrbEquippedFunction = Instance.new("RemoteFunction")
+				isOrbEquippedFunction.Name = "IsOrbEquippedFunction"
+				isOrbEquippedFunction.Parent = ReplicatedStorage
+			end
+			isOrbEquipped = isOrbEquippedFunction:InvokeServer()
+		end)
+		
+		if success and isOrbEquipped then
+			print("[GameGui] ✓ Orb equipped, proceeding with stats display")
+			break
+		end
+		
+		-- Timeout after 5 seconds
+		if tick() - orbEquipWaitStart > 5 then
+			print("[GameGui] Timeout waiting for orb (5s), proceeding anyway")
+			break
+		end
+		
+		task.wait(0.1)
+	end
 	
 	-- Reset health tracking with current value
 	previousHealth = currentHealth.Value
@@ -480,7 +590,7 @@ local function setupCharacter(newCharacter)
 	local defence = stats:FindFirstChild("Defence")
 	local dexterity = stats:FindFirstChild("Dexterity")
 	local statPoints = stats:FindFirstChild("StatPoints")
-	
+
 	if attack then
 		connections.attack = attack.Changed:Connect(updateStatsInfoDisplay)
 	end
@@ -493,14 +603,55 @@ local function setupCharacter(newCharacter)
 	if statPoints then
 		connections.statPoints = statPoints.Changed:Connect(updateStatsInfoDisplay)
 	end
-	
+
+
+	-- Helper to connect both name and id changes for a folder
+	local function connectFolderChanges(folderName, connKeyPrefix)
+		local folder = stats:FindFirstChild(folderName)
+		if folder and folder:IsA("Folder") then
+			local nameValue = folder:FindFirstChild("name")
+			local idValue = folder:FindFirstChild("id")
+			if nameValue then
+				connections[connKeyPrefix .. "Name"] = nameValue.Changed:Connect(function()
+					print("[GameGui] " .. folderName .. " name changed - updating UI")
+					task.wait(1.2)
+					updateStatsInfoDisplay()
+				end)
+			end
+			if idValue then
+				connections[connKeyPrefix .. "Id"] = idValue.Changed:Connect(function()
+					print("[GameGui] " .. folderName .. " id changed - updating UI")
+					task.wait(1.2)
+					updateStatsInfoDisplay()
+				end)
+			end
+		end
+	end
+
+	-- Listen for changes to equipped weapon, orb, and all armor slots
+	connectFolderChanges("Equipped", "equippedWeapon")
+	connectFolderChanges("EquippedOrb", "equippedOrb")
+	connectFolderChanges("EquippedHelmet", "equippedHelmet")
+	connectFolderChanges("EquippedSuit", "equippedSuit")
+	connectFolderChanges("EquippedLegs", "equippedLegs")
+
 	-- Also connect health, mana changes to StatsInfo (for visual consistency)
 	connections.healthStatsInfo = currentHealth.Changed:Connect(updateStatsInfoDisplay)
 	connections.maxHealthStatsInfo = maxHealth.Changed:Connect(updateStatsInfoDisplay)
 	connections.manaStatsInfo = currentMana.Changed:Connect(updateStatsInfoDisplay)
 	connections.maxManaStatsInfo = maxMana.Changed:Connect(updateStatsInfoDisplay)
+
+	-- Listen for server signal to refresh stats UI (fired after stat allocation/reset)
+	local refreshStatsUIEvent = ReplicatedStorage:FindFirstChild("RefreshStatsUI")
+	if refreshStatsUIEvent then
+		connections.refreshStatsUI = refreshStatsUIEvent.OnClientEvent:Connect(function()
+			print("[GameGui] Received RefreshStatsUI signal from server")
+			updateStatsInfoDisplay()
+		end)
+	end
 	
-	-- Initial update of StatsInfo
+	-- Initial update of StatsInfo (with fresh base stats from server)
+	print("[GameGui] Initial update of StatsInfo for player " .. player.Name)
 	updateStatsInfoDisplay()
 	
 	-- Setup Character button to toggle StatsInfo
@@ -540,35 +691,28 @@ local function setupCharacter(newCharacter)
 					local addDexterity = buttons:FindFirstChild("AddDexterity")
 					local resetStats = buttons:FindFirstChild("ResetStats")
 					
-					if addHealth then
-						connections.addHealth = addHealth.MouseButton1Click:Connect(function()
-							sendStatAllocationRequest("MaxHealth")
-						end)
-					end
-					
-					if addMana then
-						connections.addMana = addMana.MouseButton1Click:Connect(function()
-							sendStatAllocationRequest("MaxMana")
-						end)
-					end
-					
-					if addAttack then
-						connections.addAttack = addAttack.MouseButton1Click:Connect(function()
-							sendStatAllocationRequest("Attack")
-						end)
-					end
-					
-					if addDefence then
-						connections.addDefence = addDefence.MouseButton1Click:Connect(function()
-							sendStatAllocationRequest("Defence")
-						end)
-					end
-					
-					if addDexterity then
-						connections.addDexterity = addDexterity.MouseButton1Click:Connect(function()
-							sendStatAllocationRequest("Dexterity")
-						end)
-					end
+					   -- Use a stricter debounce and disable the button during debounce to prevent double-fire
+					   local statDebounce = false
+					   local function setupStatButton(button, statType)
+						   if button then
+							   button.MouseButton1Click:Connect(function()
+								   if not statDebounce and button.Active ~= false then
+									   statDebounce = true
+									   button.Active = false
+									   sendStatAllocationRequest(statType)
+									   task.delay(0.25, function()
+										   statDebounce = false
+										   button.Active = true
+									   end)
+								   end
+							   end)
+						   end
+					   end
+					   setupStatButton(addHealth, "MaxHealth")
+					   setupStatButton(addMana, "MaxMana")
+					   setupStatButton(addAttack, "Attack")
+					   setupStatButton(addDefence, "Defence")
+					   setupStatButton(addDexterity, "Dexterity")
 					
 					if resetStats then
 						connections.resetStats = resetStats.MouseButton1Click:Connect(function()
@@ -623,3 +767,23 @@ if weaponChangedEvent and weaponChangedEvent:IsA("BindableEvent") then
 	end)
 end
 
+if character then
+	character.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			updateStatsInfoDisplay()
+		elseif child:IsA("Accessory") then
+			-- Listen for orb accessory changes
+			updateStatsInfoDisplay()
+		end
+	end)
+	character.ChildRemoved:Connect(function(child)
+		if child:IsA("Tool") then
+			updateStatsInfoDisplay()
+		elseif child:IsA("Accessory") then
+			-- Listen for orb accessory changes
+			updateStatsInfoDisplay()
+		end
+	end)
+end
+
+return GameGui

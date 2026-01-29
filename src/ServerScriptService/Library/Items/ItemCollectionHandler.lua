@@ -74,11 +74,50 @@ local function handleItemDropCollection(player, itemDrop)
 	-- Get item type from the drop if available, otherwise pass nil to let InventoryManager infer it
 	local itemTypeObj = itemDrop:FindFirstChild("ItemType")
 	local itemType = itemTypeObj and itemTypeObj.Value
-	
+
 	print("[ItemCollectionHandler] Item type from drop: " .. tostring(itemType))
-	
-	-- Add item to player's inventory with itemType
-	local success, errorOrId = InventoryManager.AddItem(player, itemName, itemType)
+
+	-- Only allow valid item types to be passed to AddItem
+	local validTypes = { ["armor"] = true, ["weapon"] = true, ["spirit orb"] = true, ["questItem"] = true }
+	local safeItemType = validTypes[itemType] and itemType or nil
+
+	-- Special handling for spirit orbs
+	if safeItemType and safeItemType:lower() == "spirit orb" then
+		-- Get the orb name (could be from OrbName or ItemName)
+		local orbNameObj = itemDrop:FindFirstChild("OrbName")
+		local orbName = orbNameObj and orbNameObj.Value or itemName
+
+		-- Get the orb ID if available
+		local orbIdObj = itemDrop:FindFirstChild("OrbId")
+		local orbId = orbIdObj and orbIdObj.Value
+
+		print("[ItemCollectionHandler] Adding spirit orb to inventory: " .. orbName .. " (id: " .. tostring(orbId) .. ")")
+
+		-- Add orb to player's inventory with "spirit orb" itemType
+		local success, errorOrId = InventoryManager.AddItem(player, orbName, "spirit orb")
+
+		if success then
+			print("[ItemCollectionHandler] Successfully added spirit orb " .. orbName .. " to " .. player.Name .. "'s inventory (itemId: " .. errorOrId .. ")")
+			SFXEvent:FireClient(player, "ItemPickup")
+			return true
+		else
+			-- Handle inventory full case
+			local errorMsg = errorOrId or "Failed to add spirit orb to inventory"
+			warn("[ItemCollectionHandler] " .. errorMsg .. " for player " .. player.Name)
+
+			if errorMsg == "Inventory is full!" then
+				local notificationEvent = ReplicatedStorage:FindFirstChild("NotificationEvent")
+				if notificationEvent then
+					notificationEvent:FireClient(player, "Inventory Full", "Your inventory is full! Max capacity: " .. tostring(player.Stats.InventoryMaxCapacity.Value), "error")
+				end
+			end
+			return false
+		end
+	end
+
+	-- Regular item drop collection
+	-- Add item to player's inventory with safeItemType (nil if invalid)
+	local success, errorOrId = InventoryManager.AddItem(player, itemName, safeItemType)
 	
 	if success then
 		print("[ItemCollectionHandler] Successfully added " .. itemName .. " to " .. player.Name .. "'s inventory")
@@ -118,12 +157,26 @@ local function canPlayerPickupItem(player, item)
 		return true
 	end
 	
-	-- Within 10 second window: only owner can pick it up
+	-- Within 10 second window: check owner or party members
+	-- First check if player is the direct owner
 	if ownerValue and ownerValue == player then
 		return true
 	end
 	
-	-- Player is not owner and ownership window hasn't expired
+	-- Check if player is in the same party as the owner
+	if ownerValue and ownerValue.Parent then
+		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+		local playerParty = PartyDataStore.GetParty(player.UserId)
+		local ownerParty = PartyDataStore.GetParty(ownerValue.UserId)
+		
+		-- If both are in the same party, allow pickup
+		if playerParty and ownerParty and playerParty.leader == ownerParty.leader then
+			print("[ItemCollectionHandler] ✅ " .. player.Name .. " can pick up party-owned drop (party leader: " .. playerParty.leader.Name .. ")")
+			return true
+		end
+	end
+	
+	-- Player is not owner and not in owner's party, ownership window hasn't expired
 	return false
 end
 
@@ -281,9 +334,7 @@ function ItemCollectionHandler.Initialize(unifiedDataStore, inventoryMgr)
 	
 	-- Save money before player leaves
 	Players.PlayerRemoving:Connect(function(player)
-		if pendingMoneySave[player.UserId] and pendingMoneySave[player.UserId] > 0 then
-			UnifiedDataStoreManager.SaveMoney(player, true)
-		end
+		-- All saves are delegated to UnifiedDataStoreManager
 		playerCollectCooldown[player.UserId] = nil
 		pendingMoneySave[player.UserId] = nil
 	end)

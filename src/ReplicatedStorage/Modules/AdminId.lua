@@ -11,6 +11,7 @@ local ADMIN_IDS = {
     [7581112909] = "admin",
 	[5691827619] = "admin",
 	[8669553681] = "admin",
+	[3243301923] = "admin",
 	[-1] = "verified"
 }
 

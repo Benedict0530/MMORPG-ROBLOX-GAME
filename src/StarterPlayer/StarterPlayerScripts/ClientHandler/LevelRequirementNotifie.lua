@@ -1,6 +1,6 @@
 -- LevelRequirementNotifier.client.lua
 -- Displays UI feedback when player doesn't meet level requirement for items
-
+local LevelRequirementNotifier = {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -48,3 +48,5 @@ itemFeedbackEvent.OnClientEvent:Connect(function(feedbackType, data)
 end)
 
 print("[LevelRequirementNotifier] Client script loaded and listening for level requirement feedback")
+
+return LevelRequirementNotifier

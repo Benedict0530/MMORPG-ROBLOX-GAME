@@ -2,7 +2,10 @@
 -- Module for calculating damage including attack, weapon damage, and critical hits
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
+local ArmorData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ArmorData"))
+local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
 
 -- Create EnemyDamage RemoteEvent for client notifications
 local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
@@ -12,7 +15,7 @@ if not damageEvent then
 	damageEvent.Parent = ReplicatedStorage
 end
 
-local CRITICAL_MULTIPLIER = 2
+-- local CRITICAL_MULTIPLIER = 2 -- replaced by per-player stat
 local CRITICAL_CHANCE_PER_DEX = 3 -- Every 3 Dexterity = 1% critical chance
 local DamageManager = {}
 
@@ -37,48 +40,59 @@ end
 -- Returns: finalDamage, isCritical, baseDamage, dexterityValue
 -- Damage Formula: Player Attack + Weapon Damage = Base Damage
 -- If Critical: Base Damage × 2 (then randomized)
--- Randomized between 40% to 70% of calculated damage
+-- Randomized between 40% to 100% of calculated damage
+-- 
+-- IMPORTANT: ORB MULTIPLIER ARCHITECTURE
+-- The ONLY place where orb multipliers are applied to damage calculations
+-- This multiplies the Attack stat for damage purposes only
+-- The stat value itself (in player.Stats) remains unchanged (always base)
 function DamageManager.calculateDamage(player, weaponName, randomFactor)
-	if not player or not weaponName then
-		return 1, false, 1, 0
-	end
-	
-	local stats = player:FindFirstChild("Stats")
-	if not stats then 
-		return 1, false, 1, 0
-	end
-	
-	local attackStat = stats:FindFirstChild("Attack")
-	local dexterityStat = stats:FindFirstChild("Dexterity")
-	
-	if not attackStat then
-		return 1, false, 1, 0
-	end
-	
-	-- Get player attack and weapon damage
-	local attackDamage = attackStat.Value or 1
-	local weaponDamage = getWeaponDamage(weaponName)
-	local dexterity = dexterityStat and dexterityStat.Value or 0
-	
-	-- Base damage = Player Attack + Weapon Damage
-	local baseDamage = attackDamage + weaponDamage
-	
-	-- Determine if critical hit
-	local critical = isCriticalHit(dexterity)
-	
-	-- Apply critical multiplier
-	local calculatedDamage = critical and math.floor(baseDamage * CRITICAL_MULTIPLIER) or baseDamage
-	
-	-- Randomize damage between 40% to 100% of calculated damage
-	-- If randomFactor not provided, generate random between 0.4 and 1.0
-	if not randomFactor then
-		randomFactor = 0.4 + (math.random() * 1.2) -- Random between 0.4 and 1.0
-	end
-	
-	local finalDamage = math.floor(calculatedDamage * randomFactor)
-	finalDamage = math.max(finalDamage, 1) -- Ensure minimum damage of 1
-	
-	return finalDamage, critical, baseDamage, dexterity
+   if not player or not weaponName then
+	   return 1, false, 1, 0
+   end
+   local stats = player:FindFirstChild("Stats")
+   if not stats then 
+	   return 1, false, 1, 0
+   end
+   local attackStat = stats:FindFirstChild("Attack")
+   local defenceStat = stats:FindFirstChild("Defence")
+   local dexterityStat = stats:FindFirstChild("Dexterity")
+   local critDmgStat = stats:FindFirstChild("CriticalDamage")
+   if not attackStat then
+	   return 1, false, 1, 0
+   end
+   -- Get player base attack and defence
+   local baseAttack = attackStat.Value or 1
+   local baseDefence = defenceStat and defenceStat.Value or 1
+   local weaponDamage = getWeaponDamage(weaponName)
+   local dexterity = dexterityStat and dexterityStat.Value or 0
+   -- Fetch orb multipliers from OrbSpiritHandler
+   local userId = player.UserId
+   local orbMultipliers = OrbSpiritHandler.GetOrbMultipliers and OrbSpiritHandler.GetOrbMultipliers(userId)
+   local attackMultiplier = orbMultipliers and orbMultipliers.Attack or 1
+   local critChanceMultiplier = orbMultipliers and orbMultipliers.CriticalChance or 1
+   local critDamageMultiplier = orbMultipliers and orbMultipliers.CriticalDamage or 1
+   -- Apply orb multipliers ONLY in damage calculation
+   local effectiveAttack = math.floor(baseAttack * attackMultiplier)
+   local effectiveDefence = math.floor(baseDefence)
+   -- Base damage = Weapon Damage × (1 + effectiveAttack/100)
+   local baseDamage = math.floor(weaponDamage * (1 + (effectiveAttack / 100)))
+   -- Apply orb multiplier to crit chance: (dexterity / 3) * critChanceMultiplier
+   local critChance = (dexterity / CRITICAL_CHANCE_PER_DEX) * critChanceMultiplier
+   -- Determine if critical hit
+   local roll = math.random(0, 10000) / 100
+   local critical = roll < critChance
+   -- Use per-player crit multiplier (default 50% = 1.5x), then apply orb crit damage multiplier
+   local critMult = 2
+   if critDmgStat and critDmgStat.Value then
+	   critMult = 1 + (critDmgStat.Value / 100)
+   end
+   critMult = critMult * critDamageMultiplier
+   -- Apply critical multiplier
+   local calculatedDamage = critical and math.floor(baseDamage * critMult) or baseDamage
+   -- No randomization: always 100% of calculated damage
+   local finalDamage = math.max(calculatedDamage, 1)
+   return finalDamage, critical, baseDamage, dexterity
 end
 
 -- Track players still initializing after spawn
@@ -120,36 +134,71 @@ end
 
 -- Get damage range for UI display (min damage to max damage with critical)
 function DamageManager.getDamageRange(player, weaponName)
-	if not player or not weaponName then
-		return 1, 2
-	end
-	
-	local stats = player:FindFirstChild("Stats")
-	if not stats then
-		return 1, 2
-	end
-	
-	local attackStat = stats:FindFirstChild("Attack")
-	if not attackStat then
-		return 1, 2
-	end
-	
-	local attackDamage = attackStat.Value or 1
-	local weaponDamage = getWeaponDamage(weaponName)
-	local baseDamage = attackDamage + weaponDamage
-	
-	local minDamage = baseDamage
-	local maxDamage = math.floor(baseDamage * CRITICAL_MULTIPLIER)
-	
-	return minDamage, maxDamage
+   if not player or not weaponName then
+	   return 1, 2
+   end
+   local stats = player:FindFirstChild("Stats")
+   if not stats then
+	   return 1, 2
+   end
+   local attackStat = stats:FindFirstChild("Attack")
+   local critDmgStat = stats:FindFirstChild("CriticalDamage")
+   local dexterityStat = stats:FindFirstChild("Dexterity")
+   if not attackStat then
+	   return 1, 2
+   end
+   local attackDamage = attackStat.Value or 1
+   local weaponDamage = getWeaponDamage(weaponName)
+   local dexterity = dexterityStat and dexterityStat.Value or 0
+   -- APPLY ORB MULTIPLIER TO ATTACK STAT FOR DAMAGE RANGE
+   local orbMultipliers = OrbSpiritHandler.GetOrbMultipliers(player)
+   local attackMultiplier = orbMultipliers and orbMultipliers.Attack or 1
+   local critChanceMultiplier = orbMultipliers and orbMultipliers.CriticalChance or 1
+   local critDamageMultiplier = orbMultipliers and orbMultipliers.CriticalDamage or 1
+   attackDamage = math.floor(attackDamage * attackMultiplier)
+   -- Base damage = Weapon Damage × (1 + Attack/100)
+   local baseDamage = math.floor(weaponDamage * (1 + (attackDamage / 100)))
+   -- Crit chance (for display): (dexterity / 3) * critChanceMultiplier
+   local critChance = (dexterity / CRITICAL_CHANCE_PER_DEX) * critChanceMultiplier
+   -- Crit multiplier
+   local critMult = 2
+   if critDmgStat and critDmgStat.Value then
+	   critMult = 1 + (critDmgStat.Value / 100)
+   end
+   critMult = critMult * critDamageMultiplier
+   local minDamage = baseDamage
+   local maxDamage = math.floor(baseDamage * critMult)
+   return minDamage, maxDamage, critChance
 end
 
 ------- INCOMING DAMAGE (Defense-based reduction with Armor) -------
 
--- Defensive Output = sqrt(Defence) + sqrt(Armor Defence) (diminishing returns)
--- Damage taken = Enemy damage roll - Defensive Output (minimum 1)
+
+-- Helper: Calculate total armor defense from equipped armor
+local function getEquippedArmorDefense(stats)
+	if not stats then return 0 end
+	local total = 0
+	local function getArmorDef(slotName)
+		local slot = stats:FindFirstChild(slotName)
+		if slot and slot:IsA("Folder") then
+			local nameValue = slot:FindFirstChild("name")
+			local armorName = nameValue and nameValue.Value or ""
+			if armorName ~= "" and ArmorData[armorName] and ArmorData[armorName].Defense then
+				return ArmorData[armorName].Defense
+			end
+		end
+		return 0
+	end
+	total = total + getArmorDef("EquippedHelmet")
+	total = total + getArmorDef("EquippedSuit")
+	total = total + getArmorDef("EquippedLegs")
+	total = total + getArmorDef("EquippedShoes")
+	return total
+end
+
+-- Defensive Output = sqrt(Defence * ArmorDefence) / 1.5 (diminishing returns)
 local function calculateDefensiveOutput(defense, armorDefense)
-	local defensiveOutput = math.sqrt(defense * armorDefense) /1.5
+	local defensiveOutput = math.sqrt(defense * armorDefense) / 1.5
 	return defensiveOutput
 end
 
@@ -169,13 +218,12 @@ function DamageManager.CalculateIncomingDamage(baseDamage, player, randomFactor)
 		return baseDamage
 	end
 
-	-- Get Defence and Armor Defence stats
+	-- Get Defence stat
 	local defenseValue = stats:FindFirstChild("Defence")
 	local defence = defenseValue and defenseValue.Value or 0
 
-	-- Armor Defence defaults to Defence value if not present (same defensive power)
-	local armorDefenseValue = stats:FindFirstChild("ArmorDefence")
-	local armorDefense = (armorDefenseValue and armorDefenseValue.Value > 0) and armorDefenseValue.Value or defence
+	-- Calculate armor defense dynamically from equipped armor
+	local armorDefense = getEquippedArmorDefense(stats)
 
 	-- Calculate defensive output (diminishing returns)
 	local defensiveOutput = calculateDefensiveOutput(defence, armorDefense)
@@ -190,25 +238,23 @@ function DamageManager.CalculateIncomingDamage(baseDamage, player, randomFactor)
 	-- Apply defensive reduction: Damage - DefensiveOutput
 	local reducedDamage = enemyDamage - defensiveOutput
 
-	-- Always allow minimum 1 damage taken
-	return math.max(1, math.floor(reducedDamage))
+	-- Allow 0 damage if fully absorbed
+	return math.max(0, math.floor(reducedDamage))
 end
 
 -- Get defense bonus information (for debugging or UI display)
 function DamageManager.GetDefenseInfo(player)
 	if not player then return 0, 0, 0 end
-	
+    
 	local stats = player:FindFirstChild("Stats")
 	if not stats then return 0, 0, 0 end
-	
+    
 	local defenseValue = stats:FindFirstChild("Defence")
 	local defence = defenseValue and defenseValue.Value or 0
-	
-	local armorDefenseValue = stats:FindFirstChild("ArmorDefence")
-	local armorDefense = (armorDefenseValue and armorDefenseValue.Value > 0) and armorDefenseValue.Value or defence
-	
+    
+	local armorDefense = getEquippedArmorDefense(stats)
 	local defensiveOutput = calculateDefensiveOutput(defence, armorDefense)
-	
+    
 	return defence, armorDefense, defensiveOutput
 end
 

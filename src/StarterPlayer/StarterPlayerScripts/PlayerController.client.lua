@@ -1,6 +1,5 @@
 -- PlayerController.client.lua
 -- Combined script for movement controls and weapon handling
-
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -14,6 +13,18 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
+-- Get ParalysisState from ReplicatedStorage to check if player is paralyzed
+local isParalyzedValue = ReplicatedStorage:FindFirstChild("IsParalyzed")
+if not isParalyzedValue then
+	isParalyzedValue = Instance.new("BoolValue")
+	isParalyzedValue.Name = "IsParalyzed"
+	isParalyzedValue.Value = false
+	isParalyzedValue.Parent = ReplicatedStorage
+end
+
+-- Get ResumeAnimationEvent to listen for when animations should resume
+local resumeAnimationEvent = ReplicatedStorage:WaitForChild("ResumeAnimationEvent", 10)
+
 -- BindableEvent for weapon change (for GUI update)
 local weaponChangedEvent = ReplicatedStorage:FindFirstChild("WeaponChangedEvent")
 if not weaponChangedEvent then
@@ -21,6 +32,9 @@ if not weaponChangedEvent then
 	weaponChangedEvent.Name = "WeaponChangedEvent"
 	weaponChangedEvent.Parent = ReplicatedStorage
 end
+
+-- Get TeleportGuiEvent for portal touch notifications
+local TeleportGuiEvent = ReplicatedStorage:WaitForChild("TeleportGuiEvent", 10)
 
 -- Get player stats
 local stats = player:WaitForChild("Stats", 5)
@@ -47,6 +61,7 @@ local lastAttackTimes = {}
 local currentTool = nil
 local isMousePressed = false
 local isSprinting = false
+local wasSprintingBeforeDash = false
 local attackLoopConnection = nil
 local attackAnimationConnection = nil
 local isAttacking = false
@@ -58,6 +73,13 @@ local ATTACK_HOLD_THRESHOLD = 0.2 -- seconds to consider as 'held'
 -- ========== SPRINT SETTINGS ==========
 local DEFAULT_WALK_SPEED = 16
 local SPRINT_WALK_SPEED = 40
+
+-- ========== DASH SETTINGS ==========
+local DASH_SPEED = 150
+local DASH_DURATION = 0.3
+local DASH_COOLDOWN = 1
+local lastDashTime = 0
+local isDashing = false
 
 -- ========== MOBILE SETUP ==========
 local isOnMobile = UserInputService.TouchEnabled
@@ -173,6 +195,125 @@ player.CharacterAdded:Connect(function(newCharacter)
 	setupCharacter(newCharacter)
 end)
 
+-- ========== DASH FUNCTION ==========
+local function performDash()
+	-- Check cooldown
+	local currentTime = tick()
+	if currentTime - lastDashTime < DASH_COOLDOWN then
+		return
+	end
+
+	-- Check if already dashing or paralyzed
+	if isDashing or isParalyzedValue.Value then
+		return
+	end
+
+	-- Check mana (dash costs 2 mana)
+	if not currentMana or currentMana.Value < 2 then
+		print("[PlayerController] Not enough mana to dash (need 2, have " .. (currentMana and currentMana.Value or 0) .. ")")
+		return
+	end
+
+	lastDashTime = currentTime
+	isDashing = true
+	-- Store sprint state before dash
+	wasSprintingBeforeDash = isSprinting
+	print("[PlayerController] Dash executed")
+
+	-- Get or create remote event to tell server to consume mana and play dash sound
+	local performDashEvent = ReplicatedStorage:FindFirstChild("PerformDash")
+	if not performDashEvent then
+		performDashEvent = Instance.new("RemoteEvent")
+		performDashEvent.Name = "PerformDash"
+		performDashEvent.Parent = ReplicatedStorage
+	end
+
+	-- Tell server to consume mana and play dash sound
+	performDashEvent:FireServer(humanoidRootPart.Position)
+
+	-- Get camera direction to determine dash direction
+	local camera = workspace.CurrentCamera
+	local dashDirection = camera.CFrame.LookVector
+
+	-- Create BodyVelocity for dash
+	local bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.Velocity = dashDirection * DASH_SPEED
+	bodyVelocity.MaxForce = Vector3.new(math.huge, 0, math.huge) -- Only affect horizontal movement
+	bodyVelocity.Parent = humanoidRootPart
+
+	-- Play dash animation
+	if animator then
+		local dashAnimation = Instance.new("Animation")
+		dashAnimation.AnimationId = "rbxassetid://119265598803684"
+		local dashTrack = animator:LoadAnimation(dashAnimation)
+		dashTrack:Play()
+		dashTrack:AdjustSpeed(1.5) -- Speed up animation by 1.5x
+		print("[PlayerController] Dash animation playing")
+	end
+
+	-- Raycast during dash to detect obstacles in front cone only
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+	-- Exclude all player characters (not just self) from dash obstacle detection
+	local filterInstances = {character}
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= player and otherPlayer.Character then
+			table.insert(filterInstances, otherPlayer.Character)
+		end
+	end
+	raycastParams.FilterDescendantsInstances = filterInstances
+
+	local dashStartTime = tick()
+	local dashStoppedEarly = false
+	local DETECTION_CONE_ANGLE = 45 -- Only detect obstacles within 45 degrees of dash direction
+	local RAYCAST_HEIGHT = 3 -- Only detect obstacles at chest height and above, ignore ground
+
+	-- Check for obstacles every frame during dash
+	while tick() - dashStartTime < DASH_DURATION and not dashStoppedEarly do
+		local rayOrigin = humanoidRootPart.Position + Vector3.new(0, RAYCAST_HEIGHT / 2, 0) -- Raise origin to chest height
+		local rayDistance = DASH_SPEED * 0.05 -- Lookahead distance (reduced for closer detection)
+		-- Make rayDirection purely horizontal (no vertical component)
+		local horizontalDirection = Vector3.new(dashDirection.X, 0, dashDirection.Z).Unit
+		local rayDirection = horizontalDirection * rayDistance
+
+		-- Cast ray in dash direction (horizontal only)
+		local rayResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+		-- If ray hits something (not player), check if it's in front cone
+		if rayResult then
+			local hitPart = rayResult.Instance
+			-- Check if hit part belongs to player
+			if not hitPart:IsDescendantOf(character) then
+				-- Check if obstacle is in front cone
+				local hitPosition = rayResult.Position
+				local directionToHit = (hitPosition - rayOrigin).Unit
+				local dotProduct = horizontalDirection:Dot(directionToHit)
+				local angleFromDash = math.acos(math.clamp(dotProduct, -1, 1))
+				local angleInDegrees = math.deg(angleFromDash)
+
+				-- Only stop if obstacle is within front cone AND at reasonable height
+				if angleInDegrees <= DETECTION_CONE_ANGLE then
+					print("[PlayerController] Obstacle detected in front cone (" .. angleInDegrees .. "°) - stopping dash")
+					bodyVelocity.Velocity = Vector3.new(0, 0, 0) -- Stop momentum
+					dashStoppedEarly = true
+					break
+				end
+			end
+		end
+
+		task.wait(0.01) -- Check every 0.01 seconds
+	end
+
+	-- Remove dash velocity
+	if bodyVelocity and bodyVelocity.Parent then
+		bodyVelocity:Destroy()
+	end
+
+	isDashing = false
+	print("[PlayerController] Dash ended")
+
+end
+
 -- ========== ATTACK FUNCTION ==========
 local function stopAttackAndRestoreIdle()
 	if attackAnimationConnection then
@@ -199,6 +340,7 @@ end
 local function performAttack(tool)
 	if not tool or not tool.Name then return end
 	if isAnimationInProgress then return end
+	if isParalyzedValue.Value then return end -- Don't attack if paralyzed
 	isAnimationInProgress = true
 
 	-- Wait for hold threshold if holding
@@ -386,10 +528,30 @@ local function setupJumpButton()
 	end)
 end
 
+-- ========== DASH BUTTON SETUP ==========
+local function setupDashButton()
+	local playerGui = player:WaitForChild("PlayerGui")
+	local gameGui = playerGui:FindFirstChild("GameGui")
+	if not gameGui then return end
+	
+	local frame = gameGui:FindFirstChild("Frame")
+	if not frame then return end
+	
+	local dashButton = frame:FindFirstChild("DashButton")
+	if not dashButton then return end
+	
+	dashButton.Visible = UserInputService.TouchEnabled
+	
+	dashButton.MouseButton1Down:Connect(function()
+		performDash()
+	end)
+end
+
 task.wait(0.5)
 setupAttackButton()
 setupRunButton()
 setupJumpButton()
+setupDashButton()
 
 -- ========== INPUT HANDLING ==========
 
@@ -458,6 +620,17 @@ ContextActionService:BindActionAtPriority("SprintAction", function(actionName, i
 	return Enum.ContextActionResult.Pass
 end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.LeftShift)
 
+-- ========== DASH HANDLING (Q KEY) ==========
+ContextActionService:BindActionAtPriority("DashAction", function(actionName, inputState, input)
+	if input.KeyCode == Enum.KeyCode.Q then
+		if inputState == Enum.UserInputState.Begin then
+			performDash()
+		end
+		return Enum.ContextActionResult.Sink
+	end
+	return Enum.ContextActionResult.Pass
+end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.Q)
+
 -- Monitor mana while sprinting - stop sprint if mana runs out
 if currentMana then
 	currentMana:GetPropertyChangedSignal("Value"):Connect(function()
@@ -511,7 +684,7 @@ local function showTeleportFadeWithMap(mapName)
         task.wait(0.04)
     end
     -- Wait a moment after typing
-    task.wait(0.4)
+    task.wait(1)
     -- Fade out
     local tweenService = game:GetService("TweenService")
     local tween = tweenService:Create(frame, TweenInfo.new(1), {BackgroundTransparency = 1})
@@ -520,6 +693,14 @@ local function showTeleportFadeWithMap(mapName)
     teleportGui.Enabled = false
     frame.BackgroundTransparency = 0 -- reset for next use
     textLabel.Text = ""
+end
+
+-- Listen for portal touch events from server
+if TeleportGuiEvent then
+	TeleportGuiEvent.OnClientEvent:Connect(function(mapName)
+		print("[PlayerController] Portal touch detected - showing teleport UI for:", mapName)
+		showTeleportFadeWithMap(mapName)
+	end)
 end
 
 -- Show teleport fade on respawn
@@ -607,4 +788,25 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
-
+-- Handle animation resume when paralysis ends
+if resumeAnimationEvent then
+	resumeAnimationEvent.OnClientEvent:Connect(function()
+		print("[PlayerController] Resuming animation control after paralysis")
+		if currentTool and animator then
+			-- Play idle animation to resume control
+			local idleAnimation = currentTool:FindFirstChild("Idle")
+			if idleAnimation and idleAnimation:IsA("Animation") then
+				for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+					track:Stop()
+				end
+				local idleTrack = animator:LoadAnimation(idleAnimation)
+				idleTrack.Looped = true
+				idleTrack:Play()
+				currentAnimationTrack = idleTrack
+				lastAnimationType = "Idle"
+				isAnimationInProgress = false
+				print("[PlayerController] Idle animation resumed")
+			end
+		end
+	end)
+end

@@ -67,11 +67,17 @@ local DEFAULT_STATS = {
 	NeededExperience = 10,
 	StatPoints = 3,
 	Equipped = nil, -- Will be set per-player using InventoryManager.CreateStarterWeaponAndEquipped
+	EquippedSuit = nil, -- Armor suit slot
+	EquippedHelmet = nil, -- Armor helmet slot
+	EquippedLegs = nil, -- Armor legs slot
+	EquippedShoes = nil, -- Armor shoes slot
 	ResetPoints = 1,
 	PlayerMap = "Grimleaf Entrance",
 	LastSpawnName = "SpawnLocation", -- Track last used spawn part
 	InventoryCapacity = 0, -- Current item count (updated dynamically based on actual inventory)
-	InventoryMaxCapacity = 10 -- Max items allowed (can be increased by gamepass later)
+	InventoryMaxCapacity = 10, -- Max items allowed (can be increased by gamepass later)
+	HasOrbBuff = false, -- Track if orb buff was active at save
+	CriticalDamage = 50, -- Default critical damage percent (50%)
 }
 
 local function setupStatsFolder(player, data)
@@ -79,23 +85,9 @@ local function setupStatsFolder(player, data)
 	statsFolder.Name = "Stats"
 	statsFolder.Parent = player
 
-	-- If equipped is blank, try to set it to the first item in inventory (if available)
-	if data.Equipped and (data.Equipped.name == "" or data.Equipped.id == "") then
-		-- Try to get inventory from InventoryManager
-		local success, InventoryManager = pcall(function()
-			return require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
-		end)
-		if success and InventoryManager then
-			local inventory = InventoryManager.GetInventory(player)
-			if inventory and #inventory > 0 then
-				data.Equipped = { name = inventory[1].name, id = inventory[1].id }
-			end
-		end
-	end
-
 	for statName, value in pairs(data) do
 		local statValue
-		if statName == "Equipped" then
+		if statName == "Equipped" or statName == "EquippedSuit" or statName == "EquippedHelmet" or statName == "EquippedLegs" or statName == "EquippedShoes" then
 			statValue = Instance.new("Folder")
 			statValue.Name = statName
 			statValue.Parent = statsFolder
@@ -118,10 +110,44 @@ local function setupStatsFolder(player, data)
 				idValue.Value = ""
 				idValue.Parent = statValue
 			end
-		elseif statName == "PlayerMap" or statName == "LastSpawnName" then
+		elseif statName == "EquippedOrb" then
+			-- ...existing code...
+			statValue = Instance.new("Folder")
+			statValue.Name = statName
+			statValue.Parent = statsFolder
+			if type(value) == "table" then
+				local nameValue = Instance.new("StringValue")
+				nameValue.Name = "name"
+				nameValue.Value = value.name or ""
+				nameValue.Parent = statValue
+				local idValue = Instance.new("StringValue")
+				idValue.Name = "id"
+				idValue.Value = value.id or ""
+				idValue.Parent = statValue
+			else
+				local nameValue = Instance.new("StringValue")
+				nameValue.Name = "name"
+				nameValue.Value = ""
+				nameValue.Parent = statValue
+				local idValue = Instance.new("StringValue")
+				idValue.Name = "id"
+				idValue.Value = ""
+				idValue.Parent = statValue
+			end
+		elseif statName == "PlayerMap" or statName == "LastSpawnName" or statName == "SpiritOrb" then
 			statValue = Instance.new("StringValue")
 			statValue.Name = statName
 			statValue.Value = tostring(value)
+			statValue.Parent = statsFolder
+		elseif statName == "HasOrbBuff" then
+			local boolValue = Instance.new("BoolValue")
+			boolValue.Name = statName
+			boolValue.Value = value and true or false
+			boolValue.Parent = statsFolder
+		elseif statName == "CriticalDamage" then
+			statValue = Instance.new("IntValue")
+			statValue.Name = statName
+			statValue.Value = value
 			statValue.Parent = statsFolder
 		else
 			statValue = Instance.new("IntValue")
@@ -130,49 +156,117 @@ local function setupStatsFolder(player, data)
 			statValue.Parent = statsFolder
 		end
 	end
+	
+	-- Ensure EquippedOrb folder exists (in case it wasn't in the loaded data)
+	if not statsFolder:FindFirstChild("EquippedOrb") then
+		local equippedOrbFolder = Instance.new("Folder")
+		equippedOrbFolder.Name = "EquippedOrb"
+		equippedOrbFolder.Parent = statsFolder
+		
+		local orbNameValue = Instance.new("StringValue")
+		orbNameValue.Name = "name"
+		orbNameValue.Value = ""
+		orbNameValue.Parent = equippedOrbFolder
+		
+		local orbIdValue = Instance.new("StringValue")
+		orbIdValue.Name = "id"
+		orbIdValue.Value = ""
+		orbIdValue.Parent = equippedOrbFolder
+		
+		print("[PlayerDataStore] Created EquippedOrb folder for " .. player.Name)
+	end
 end
 
 local function migrateData(oldData)
     -- Ensure Equipped field exists and is in correct table format
-    local equippedWeaponName = ""
-    local equippedItemId = ""
-    
-    -- Check if old Equipped field exists
-    if oldData.Equipped then
-        if type(oldData.Equipped) == "table" then
-            -- Already in new format
-            equippedWeaponName = oldData.Equipped.name or ""
-            equippedItemId = oldData.Equipped.id or ""
-        elseif type(oldData.Equipped) == "string" and oldData.Equipped ~= "" then
-            -- Old string format
-            equippedWeaponName = oldData.Equipped
-        end
-    end
-    
-    -- Check for legacy EquippedItemId field and merge it
-    if oldData.EquippedItemId and oldData.EquippedItemId ~= "" then
-        equippedItemId = oldData.EquippedItemId
-    end
-    
-    -- Set Equipped to new table format
-    oldData.Equipped = {
-        name = equippedWeaponName,
-        id = equippedItemId
-    }
-    
-    -- Remove old EquippedItemId field if it exists
-    oldData.EquippedItemId = nil
-    
-    -- Merge any missing fields from DEFAULT_STATS
-    for statName, defaultValue in pairs(DEFAULT_STATS) do
-        if oldData[statName] == nil then
-            oldData[statName] = defaultValue
-        end
-    end
-    return oldData
+	local equippedWeaponName = ""
+	local equippedItemId = ""
+
+	-- Patch: Only weapons go in Equipped, armors go in their slots
+	if oldData.Equipped then
+		if type(oldData.Equipped) == "table" then
+			local equippedItemType = oldData.Equipped.itemType or nil
+			if equippedItemType == "weapon" or equippedItemType == nil then
+				equippedWeaponName = oldData.Equipped.name or ""
+				equippedItemId = oldData.Equipped.id or ""
+			elseif equippedItemType == "armor" then
+				-- Place in correct armor slot
+				local armorName = oldData.Equipped.name or ""
+				local armorId = oldData.Equipped.id or ""
+				   -- Try to detect armor type from name (Helmet, Suit, Legs, Shoes/Boots)
+				   local lowerName = armorName:lower()
+				   if lowerName:find("helmet") then
+					   oldData.EquippedHelmet = { name = armorName, id = armorId }
+				   elseif lowerName:find("suit") then
+					   oldData.EquippedSuit = { name = armorName, id = armorId }
+				   elseif lowerName:find("legs") then
+					   oldData.EquippedLegs = { name = armorName, id = armorId }
+				   elseif lowerName:find("shoes") or lowerName:find("boots") then
+					   oldData.EquippedShoes = { name = armorName, id = armorId }
+				   end
+				-- Clear Equipped slot for armor
+				equippedWeaponName = ""
+				equippedItemId = ""
+			end
+		elseif type(oldData.Equipped) == "string" and oldData.Equipped ~= "" then
+			-- Old string format, assume weapon
+			equippedWeaponName = oldData.Equipped
+		end
+	end
+
+	-- Check for legacy EquippedItemId field and merge it
+	if oldData.EquippedItemId and oldData.EquippedItemId ~= "" then
+		equippedItemId = oldData.EquippedItemId
+	end
+
+	-- Set Equipped to new table format (only weapon)
+	oldData.Equipped = {
+		name = equippedWeaponName,
+		id = equippedItemId
+	}
+
+	-- Remove old EquippedItemId field if it exists
+	oldData.EquippedItemId = nil
+
+	-- Ensure EquippedOrb exists (for spirit orbs from inventory)
+	if not oldData.EquippedOrb then
+		oldData.EquippedOrb = {
+			name = "",
+			id = ""
+		}
+	elseif type(oldData.EquippedOrb) == "string" then
+		oldData.EquippedOrb = {
+			name = oldData.EquippedOrb,
+			id = ""
+		}
+	end
+
+	-- Ensure EquippedSuit, EquippedHelmet, EquippedLegs, and EquippedShoes exist and are in correct format
+	local function ensureArmorSlot(slotName)
+		if not oldData[slotName] or type(oldData[slotName]) ~= "table" then
+			oldData[slotName] = { name = "", id = "" }
+		else
+			if not oldData[slotName].name then oldData[slotName].name = "" end
+			if not oldData[slotName].id then oldData[slotName].id = "" end
+		end
+	end
+	ensureArmorSlot("EquippedSuit")
+	ensureArmorSlot("EquippedHelmet")
+	ensureArmorSlot("EquippedLegs")
+	ensureArmorSlot("EquippedShoes")
+
+	-- Merge any missing fields from DEFAULT_STATS
+	for statName, defaultValue in pairs(DEFAULT_STATS) do
+		if oldData[statName] == nil then
+			oldData[statName] = defaultValue
+		end
+	end
+	return oldData
 end
 
 Players.PlayerAdded:Connect(function(player)
+	print("[PlayerDataStore] ========== PLAYER JOINING: " .. player.Name .. " ==========")
+	
 	local key = "Player_" .. player.UserId
 	local data
 	local success, err = pcall(function()
@@ -180,10 +274,20 @@ Players.PlayerAdded:Connect(function(player)
 	end)
 	if not success or not data then
 		-- No data exists, create default entry
+		print("[PlayerDataStore] No existing data found, creating new player with defaults")
 		local InventoryManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
 		local inventory, equipped = InventoryManager.CreateStarterWeaponAndEquipped()
-		-- Instead of generating a new equipped id, use the id of the starter item in inventory
-		local starterEquipped = { name = inventory[1].name, id = inventory[1].id }
+		-- Set both Twig and Normal Orb as equipped for new players
+		local starterEquipped = {}
+		if equipped and type(equipped) == "table" then
+			-- If equipped is a table of items, add each as equipped
+			for _, item in ipairs(equipped) do
+				table.insert(starterEquipped, { name = item.name, id = item.id })
+			end
+		else
+			-- Fallback: single equipped item
+			starterEquipped = { name = inventory[1].name, id = inventory[1].id }
+		end
 		local newStats = table.clone(DEFAULT_STATS)
 		newStats.Equipped = starterEquipped
 		local createSuccess, createErr = pcall(function()
@@ -198,6 +302,13 @@ Players.PlayerAdded:Connect(function(player)
 		UnifiedDataStoreManager.SaveInventory(player.UserId, inventory, true)
 	else
 		-- Data loaded from DataStore
+		print("[PlayerDataStore] Loaded player data from DataStore:")
+		print("  ├─ Attack: " .. (data.Attack or "nil"))
+		print("  ├─ Defence: " .. (data.Defence or "nil"))
+		print("  ├─ MaxHealth: " .. (data.MaxHealth or "nil"))
+		print("  ├─ MaxMana: " .. (data.MaxMana or "nil"))
+		print("  └─ Dexterity: " .. (data.Dexterity or "nil"))
+		
 		-- If CurrentHealth is nil or <= 0, reset to MaxHealth
 		if data["CurrentHealth"] == nil or data["CurrentHealth"] <= 0 then
 			data["CurrentHealth"] = data["MaxHealth"] or DEFAULT_STATS.MaxHealth
@@ -216,6 +327,20 @@ Players.PlayerAdded:Connect(function(player)
 	end
 	-- Setup stats folder with loaded data
 	setupStatsFolder(player, data)
+	-- Log EquippedOrb value after setup
+	local stats = player:FindFirstChild("Stats")
+	if stats then
+		local equippedOrb = stats:FindFirstChild("EquippedOrb")
+		if equippedOrb and equippedOrb:IsA("Folder") then
+			local orbName = equippedOrb:FindFirstChild("name")
+			local orbId = equippedOrb:FindFirstChild("id")
+			local actualName = orbName and orbName.Value or "nil"
+			local actualId = orbId and orbId.Value or "nil"
+			print("[PlayerDataStore] On join: EquippedOrb actual value: name='" .. actualName .. "', id='" .. actualId .. "'")
+		end
+	end
+
+	print("[PlayerDataStore] ✓ Base stats restored and captured for " .. player.Name)
     
 	-- Signal that Stats folder is ready for this player
 	local signal = getStatsReadySignal(player.UserId)
@@ -332,7 +457,7 @@ Players.PlayerAdded:Connect(function(player)
 				end
 
 				-- Save the reset health/mana to DataStore
-				UnifiedDataStoreManager.SaveStats(player, true)
+			UnifiedDataStoreManager.SaveStats(player, false)
 			end
 
 			-- Add all parts of the character to the Players collision group
@@ -374,19 +499,21 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-	-- Mark player as disconnected so their character can't receive damage
-	local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
-	DamageManager.MarkPlayerDisconnected(player)
-	
-	UnifiedDataStoreManager.SaveStats(player, true)
+	-- ...existing code...
 end)
 
--- Optionally, save all players on server shutdown
+
+-- Save all players on server shutdown and wait to ensure saves complete
 if game:IsA("DataModel") then
 	game:BindToClose(function()
+		print("[PlayerDataStore] BindToClose: Saving all player stats before shutdown...")
 		for _, player in ipairs(Players:GetPlayers()) do
 			UnifiedDataStoreManager.SaveStats(player, true)
 		end
+		-- Wait up to 25 seconds for all saves to complete
+		print("[PlayerDataStore] BindToClose: Waiting for saves to finish...")
+		task.wait(5)
+		print("[PlayerDataStore] BindToClose: Shutdown complete.")
 	end)
 end
 
