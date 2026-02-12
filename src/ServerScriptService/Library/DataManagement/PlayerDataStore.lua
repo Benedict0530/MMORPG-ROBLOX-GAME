@@ -11,6 +11,34 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 local statsStore = DataStoreService:GetDataStore("PlayerStats")
 
+-- Check if DataStore is available (warns if Studio Access to API Services is disabled)
+local function checkDataStoreAvailability()
+	local testSuccess, testErr = pcall(function()
+		statsStore:GetAsync("_TEST_KEY_")
+	end)
+	if not testSuccess then
+		if tostring(testErr):find("502") or tostring(testErr):find("API Services") or tostring(testErr):find("Studio") then
+			warn("╔═══════════════════════════════════════════════════════════╗")
+			warn("║  ⚠️  DATASTORE NOT AVAILABLE - STUDIO MODE DETECTED  ⚠️   ║")
+			warn("╠═══════════════════════════════════════════════════════════╣")
+			warn("║  Player data will NOT save between sessions!              ║")
+			warn("║                                                           ║")
+			warn("║  TO FIX:                                                  ║")
+			warn("║  1. Click Home tab → Game Settings                        ║")
+			warn("║  2. Go to Security section                                ║")
+			warn("║  3. Enable 'Enable Studio Access to API Services'         ║")
+			warn("║  4. Click Save and restart the game                       ║")
+			warn("╚═══════════════════════════════════════════════════════════╝")
+			return false
+		end
+	end
+	print("[PlayerDataStore] ✅ DataStore API is available")
+	return true
+end
+
+-- Run availability check on script startup
+task.spawn(checkDataStoreAvailability)
+
 -- Create or get Players collision group
 local function setupPlayerCollisionGroup()
 	local success, err = pcall(function()
@@ -67,15 +95,17 @@ local DEFAULT_STATS = {
 	NeededExperience = 10,
 	StatPoints = 3,
 	Equipped = nil, -- Will be set per-player using InventoryManager.CreateStarterWeaponAndEquipped
+	SecondaryEquipped = nil, -- Secondary weapon slot
 	EquippedSuit = nil, -- Armor suit slot
 	EquippedHelmet = nil, -- Armor helmet slot
 	EquippedLegs = nil, -- Armor legs slot
 	EquippedShoes = nil, -- Armor shoes slot
 	ResetPoints = 1,
 	PlayerMap = "Grimleaf Entrance",
+	UltimateCharge = 0, -- Persistent ultimate bar
 	LastSpawnName = "SpawnLocation", -- Track last used spawn part
 	InventoryCapacity = 0, -- Current item count (updated dynamically based on actual inventory)
-	InventoryMaxCapacity = 10, -- Max items allowed (can be increased by gamepass later)
+	InventoryMaxCapacity = 30, -- Max items allowed (can be increased by gamepass later)
 	HasOrbBuff = false, -- Track if orb buff was active at save
 	CriticalDamage = 50, -- Default critical damage percent (50%)
 }
@@ -87,7 +117,7 @@ local function setupStatsFolder(player, data)
 
 	for statName, value in pairs(data) do
 		local statValue
-		if statName == "Equipped" or statName == "EquippedSuit" or statName == "EquippedHelmet" or statName == "EquippedLegs" or statName == "EquippedShoes" then
+		if statName == "Equipped" or statName == "SecondaryEquipped" or statName == "EquippedSuit" or statName == "EquippedHelmet" or statName == "EquippedLegs" or statName == "EquippedShoes" then
 			statValue = Instance.new("Folder")
 			statValue.Name = statName
 			statValue.Parent = statsFolder
@@ -110,6 +140,11 @@ local function setupStatsFolder(player, data)
 				idValue.Value = ""
 				idValue.Parent = statValue
 			end
+		elseif statName == "UltimateCharge" then
+			statValue = Instance.new("IntValue")
+			statValue.Name = statName
+			statValue.Value = value or 0
+			statValue.Parent = statsFolder
 		elseif statName == "EquippedOrb" then
 			-- ...existing code...
 			statValue = Instance.new("Folder")
@@ -173,7 +208,7 @@ local function setupStatsFolder(player, data)
 		orbIdValue.Value = ""
 		orbIdValue.Parent = equippedOrbFolder
 		
-		print("[PlayerDataStore] Created EquippedOrb folder for " .. player.Name)
+		--print("[PlayerDataStore] Created EquippedOrb folder for " .. player.Name)
 	end
 end
 
@@ -241,6 +276,14 @@ local function migrateData(oldData)
 		}
 	end
 
+	-- Ensure SecondaryEquipped exists
+	if not oldData.SecondaryEquipped or type(oldData.SecondaryEquipped) ~= "table" then
+		oldData.SecondaryEquipped = { name = "", id = "" }
+	else
+		if not oldData.SecondaryEquipped.name then oldData.SecondaryEquipped.name = "" end
+		if not oldData.SecondaryEquipped.id then oldData.SecondaryEquipped.id = "" end
+	end
+
 	-- Ensure EquippedSuit, EquippedHelmet, EquippedLegs, and EquippedShoes exist and are in correct format
 	local function ensureArmorSlot(slotName)
 		if not oldData[slotName] or type(oldData[slotName]) ~= "table" then
@@ -261,53 +304,88 @@ local function migrateData(oldData)
 			oldData[statName] = defaultValue
 		end
 	end
+	
+	-- Update stats if they're lower than default (for base stat increases)
+	-- Only update base stats, not progress stats like Level, Experience, Money
+	local statsToUpdate = {
+		"MaxHealth", "MaxMana", "Attack", "Defence", "Dexterity", "InventoryMaxCapacity", "CriticalDamage"
+	}
+	for _, statName in ipairs(statsToUpdate) do
+		if DEFAULT_STATS[statName] and oldData[statName] then
+			if type(DEFAULT_STATS[statName]) == "number" and type(oldData[statName]) == "number" then
+				if oldData[statName] < DEFAULT_STATS[statName] then
+					oldData[statName] = DEFAULT_STATS[statName]
+				end
+			end
+		end
+	end
+	
 	return oldData
 end
 
 Players.PlayerAdded:Connect(function(player)
-	print("[PlayerDataStore] ========== PLAYER JOINING: " .. player.Name .. " ==========")
+	print("[PlayerDataStore] ========== PLAYER JOINING: " .. player.Name .. " ===========")
 	
 	local key = "Player_" .. player.UserId
 	local data
 	local success, err = pcall(function()
 		data = statsStore:GetAsync(key)
 	end)
-	if not success or not data then
-		-- No data exists, create default entry
-		print("[PlayerDataStore] No existing data found, creating new player with defaults")
+	
+	if not success then
+		-- DataStore error occurred
+		warn("[PlayerDataStore] ⚠️ DataStore GetAsync FAILED for " .. player.Name .. " (" .. player.UserId .. ")")
+		warn("[PlayerDataStore] Error: " .. tostring(err))
+		warn("[PlayerDataStore] POSSIBLE CAUSES:")
+		warn("[PlayerDataStore]   1. Studio Access to API Services is DISABLED (most common in Studio)")
+		warn("[PlayerDataStore]   2. Network error or throttling")
+		warn("[PlayerDataStore]   3. DataStore service unavailable")
+		warn("[PlayerDataStore] Creating temporary default stats...")
+	elseif not data then
+		-- No saved data found (new player)
+		print("[PlayerDataStore] ✨ New player detected: " .. player.Name .. " - Creating starter stats")
 		local InventoryManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
-		local inventory, equipped = InventoryManager.CreateStarterWeaponAndEquipped()
-		-- Set both Twig and Normal Orb as equipped for new players
-		local starterEquipped = {}
-		if equipped and type(equipped) == "table" then
-			-- If equipped is a table of items, add each as equipped
-			for _, item in ipairs(equipped) do
-				table.insert(starterEquipped, { name = item.name, id = item.id })
-			end
-		else
-			-- Fallback: single equipped item
-			starterEquipped = { name = inventory[1].name, id = inventory[1].id }
-		end
-		local newStats = table.clone(DEFAULT_STATS)
-		newStats.Equipped = starterEquipped
-		local createSuccess, createErr = pcall(function()
-			statsStore:SetAsync(key, newStats)
-		end)
-		if not createSuccess then
-			warn("[PlayerDataStore] Failed to create data for player " .. player.Name .. " (" .. player.UserId .. "): " .. tostring(createErr))
-		end
-		data = newStats
-		-- Also immediately save starter inventory for this player
-		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-		UnifiedDataStoreManager.SaveInventory(player.UserId, inventory, true)
+		   local inventory, equipped = InventoryManager.CreateStarterWeaponAndEquipped()
+		   -- Only set Twig as equipped weapon for new players
+		   local twig = nil
+		   for _, item in ipairs(inventory) do
+			   if item.name == "Twig" then
+				   twig = item
+				   break
+			   end
+		   end
+		   local newStats = table.clone(DEFAULT_STATS)
+		   if twig then
+			   newStats.Equipped = { name = twig.name, id = twig.id }
+		   else
+			   -- Fallback: use first item
+			   newStats.Equipped = { name = inventory[1].name, id = inventory[1].id }
+		   end
+		   -- Initialize all equipment slots for new players
+		   newStats.SecondaryEquipped = { name = "", id = "" }
+		   newStats.EquippedSuit = { name = "", id = "" }
+		   newStats.EquippedHelmet = { name = "", id = "" }
+		   newStats.EquippedLegs = { name = "", id = "" }
+		   newStats.EquippedShoes = { name = "", id = "" }
+		   newStats.EquippedOrb = { name = "", id = "" }
+		   local createSuccess, createErr = pcall(function()
+			   statsStore:SetAsync(key, newStats)
+		   end)
+		   if not createSuccess then
+			   warn("[PlayerDataStore] ❌ FAILED to save initial data for " .. player.Name .. " (" .. player.UserId .. ")")
+			   warn("[PlayerDataStore] Error: " .. tostring(createErr))
+			   warn("[PlayerDataStore] Data will NOT persist! Enable Studio Access to API Services!")
+		   else
+			   print("[PlayerDataStore] ✅ Initial data saved for new player: " .. player.Name)
+		   end
+		   data = newStats
+		   -- Also immediately save starter inventory for this player
+		   local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+		   UnifiedDataStoreManager.SaveInventory(player.UserId, inventory, true)
 	else
 		-- Data loaded from DataStore
-		print("[PlayerDataStore] Loaded player data from DataStore:")
-		print("  ├─ Attack: " .. (data.Attack or "nil"))
-		print("  ├─ Defence: " .. (data.Defence or "nil"))
-		print("  ├─ MaxHealth: " .. (data.MaxHealth or "nil"))
-		print("  ├─ MaxMana: " .. (data.MaxMana or "nil"))
-		print("  └─ Dexterity: " .. (data.Dexterity or "nil"))
+		print("[PlayerDataStore] ✅ Loaded saved data for: " .. player.Name)
+		print("[PlayerDataStore] Stats: Level " .. (data.Level or 1) .. " | HP: " .. (data.MaxHealth or 10) .. " | ATK: " .. (data.Attack or 1) .. " | Money: " .. (data.Money or 0))
 		
 		-- If CurrentHealth is nil or <= 0, reset to MaxHealth
 		if data["CurrentHealth"] == nil or data["CurrentHealth"] <= 0 then
@@ -336,11 +414,11 @@ Players.PlayerAdded:Connect(function(player)
 			local orbId = equippedOrb:FindFirstChild("id")
 			local actualName = orbName and orbName.Value or "nil"
 			local actualId = orbId and orbId.Value or "nil"
-			print("[PlayerDataStore] On join: EquippedOrb actual value: name='" .. actualName .. "', id='" .. actualId .. "'")
+			--print("[PlayerDataStore] On join: EquippedOrb actual value: name='" .. actualName .. "', id='" .. actualId .. "'")
 		end
 	end
 
-	print("[PlayerDataStore] ✓ Base stats restored and captured for " .. player.Name)
+	--print("[PlayerDataStore] ✓ Base stats restored and captured for " .. player.Name)
     
 	-- Signal that Stats folder is ready for this player
 	local signal = getStatsReadySignal(player.UserId)
@@ -410,7 +488,7 @@ Players.PlayerAdded:Connect(function(player)
 			-- Fallbacks only if both are missing
 			if not mapName then mapName = "Grimleaf Entrance" end
 			if not spawnName then spawnName = "SpawnLocation" end
-			print("[PlayerDataStore] Respawn: PlayerMap=", mapName, ", LastSpawnName=", spawnName)
+			--print("[PlayerDataStore] Respawn: PlayerMap=", mapName, ", LastSpawnName=", spawnName)
 			local mapFolder = workspace:FindFirstChild("Maps")
 			local spawnLocation = nil
 			if mapFolder then
@@ -420,13 +498,13 @@ Players.PlayerAdded:Connect(function(player)
 				end
 			end
 			if player:GetAttribute("IsPortalTeleporting") then
-				print("[PlayerDataStore] Skipping respawn teleport due to portal teleport.")
+				--print("[PlayerDataStore] Skipping respawn teleport due to portal teleport.")
 				return
 			end
 			if spawnLocation and spawnLocation:IsA("BasePart") then
 				local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
 				if humanoidRootPart then
-					print("[PlayerDataStore] Actually respawning to part:", spawnLocation.Name, "in map:", mapName, "at position", tostring(spawnLocation.Position))
+					--print("[PlayerDataStore] Actually respawning to part:", spawnLocation.Name, "in map:", mapName, "at position", tostring(spawnLocation.Position))
 					-- If respawning at default SpawnLocation, reset portal state to allow portal use
 					if spawnLocation.Name == "SpawnLocation" then
 						local PortalHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("PortalHandler"))
@@ -490,7 +568,7 @@ Players.PlayerAdded:Connect(function(player)
 
 	-- Handle initial character if it exists (NEW PLAYERS ON FIRST JOIN)
 	if player.Character then
-		print("[PlayerDataStore] Initial character exists for", player.Name, "- teleporting to spawn location")
+		--print("[PlayerDataStore] Initial character exists for", player.Name, "- teleporting to spawn location")
 		handleCharacterSpawn(player.Character)
 	end
 
@@ -506,14 +584,14 @@ end)
 -- Save all players on server shutdown and wait to ensure saves complete
 if game:IsA("DataModel") then
 	game:BindToClose(function()
-		print("[PlayerDataStore] BindToClose: Saving all player stats before shutdown...")
+		--print("[PlayerDataStore] BindToClose: Saving all player stats before shutdown...")
 		for _, player in ipairs(Players:GetPlayers()) do
 			UnifiedDataStoreManager.SaveStats(player, true)
 		end
 		-- Wait up to 25 seconds for all saves to complete
-		print("[PlayerDataStore] BindToClose: Waiting for saves to finish...")
-		task.wait(5)
-		print("[PlayerDataStore] BindToClose: Shutdown complete.")
+		--print("[PlayerDataStore] BindToClose: Waiting for saves to finish...")
+		task.wait(0)
+		--print("[PlayerDataStore] BindToClose: Shutdown complete.")
 	end)
 end
 

@@ -5,12 +5,15 @@
 local DungeonsData = {
 	["Grimleaf 1 Dungeon"] = {
 		Name = "Grimleaf 1 Dungeon",
-		ExpMultiplier = 2.0,
-		GoldMultiplier = 1.5,
+		ExpMultiplier = 4,
+		GoldMultiplier = 3,
 		Story = "Deep within Grimleaf Forest lies a dungeon filled with ancient secrets and powerful foes. Only the bravest adventurers dare to enter.",
-		EntryLevelRequirement = 10,
+		EntryLevelRequirement = 1,
 		EntryItemRequirement = "Gloop Spike",
 		TimeLimitMinutes = 30,
+		OutMap = "Grimleaf 1",
+		OutSpawn = "DungeonExitSpawn",
+		AllowPVP = true,
 		DropsText = [[
 Dungeon Drops
 - Grimleaf Sword

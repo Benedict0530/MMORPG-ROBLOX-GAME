@@ -20,7 +20,7 @@ local previousLevel = nil
 local animationQueue = {}
 local isAnimating = false
 
-print("[LevelUpDisplay.client] Script started")
+--print("[LevelUpDisplay.client] Script started")
 
 -- Setup level monitoring
 local function setupLevelMonitoring()
@@ -48,7 +48,7 @@ local function setupLevelMonitoring()
 	-- Connect to level changes
 	level.Changed:Connect(function(newLevel)
 		if newLevel > previousLevel then
-			print("[LevelUpDisplay.client] Level up! New level:", newLevel)
+			--print("[LevelUpDisplay.client] Level up! New level:", newLevel)
 			showLevelUpAnimation(newLevel, experience.Value, neededExperience.Value)
 			previousLevel = newLevel
 		end
@@ -63,7 +63,7 @@ function showLevelUpAnimation(level, currentExp, neededExp)
 			func = showLevelUpAnimation,
 			args = {level, currentExp, neededExp}
 		})
-		print("[LevelUpDisplay.client] Level-up queued, will show after current animation")
+		--print("[LevelUpDisplay.client] Level-up queued, will show after current animation")
 		return
 	end
 	
@@ -103,7 +103,7 @@ function showLevelUpAnimation(level, currentExp, neededExp)
 	-- Hide the frame
 	LevelUpFrame.Visible = false
 	
-	print("[LevelUpDisplay.client] Level up animation complete")
+	--print("[LevelUpDisplay.client] Level up animation complete")
 	
 	isAnimating = false
 	
@@ -123,7 +123,7 @@ function showQuestRewardAnimation(questName, experience, gold)
 			func = showQuestRewardAnimation,
 			args = {questName, experience, gold}
 		})
-		print("[LevelUpDisplay.client] Quest reward queued, will show after current animation")
+		--print("[LevelUpDisplay.client] Quest reward queued, will show after current animation")
 		return
 	end
 	
@@ -163,7 +163,7 @@ function showQuestRewardAnimation(questName, experience, gold)
 	-- Hide the frame
 	LevelUpFrame.Visible = false
 	
-	print("[LevelUpDisplay.client] Quest reward animation complete")
+	--print("[LevelUpDisplay.client] Quest reward animation complete")
 	
 	isAnimating = false
 	
@@ -177,7 +177,7 @@ end
 -- Wait for stats and setup monitoring
 task.spawn(function()
 	setupLevelMonitoring()
-	print("[LevelUpDisplay.client] ✓ Level monitoring setup complete")
+	--print("[LevelUpDisplay.client] ✓ Level monitoring setup complete")
 end)
 
 -- Listen for quest completion events from server
@@ -185,10 +185,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local questCompleteEvent = ReplicatedStorage:WaitForChild("QuestComplete")
 
 questCompleteEvent.OnClientEvent:Connect(function(questName, experience, gold)
-	print("[LevelUpDisplay.client] Quest completed! Name:", questName, "| XP:", experience, "| Gold:", gold)
+	--print("[LevelUpDisplay.client] Quest completed! Name:", questName, "| XP:", experience, "| Gold:", gold)
 	showQuestRewardAnimation(questName, experience, gold)
 end)
 
-print("[LevelUpDisplay.client] Quest completion listener setup complete")
+--print("[LevelUpDisplay.client] Quest completion listener setup complete")
 
 return LevelUpDisplay

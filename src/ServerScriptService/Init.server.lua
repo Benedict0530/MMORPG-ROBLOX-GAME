@@ -2,7 +2,18 @@
 -- Main server initialization script - Consolidated Single Entry Point
 -- Requires and initializes all game systems from the Library folder
 -- All functionality is organized in Library/[Category]/[Module]
+--
+-- ⚠️ IMPORTANT FOR STUDIO TESTING:
+-- DataStore is DISABLED by default in Roblox Studio.
+-- To enable player data saving in Studio:
+--   1. Click "Home" tab → "Game Settings" button
+--   2. Navigate to "Security" section
+--   3. Enable "Enable Studio Access to API Services"
+--   4. Click "Save" and restart the game
+-- Without this, all player data will be lost between sessions!
+--
 
+print("[Init] 🚀 Init.server.lua starting...")
 
 -- === SERVER READY WAIT ===
 -- Wait for all critical services and assets to be available before initializing modules
@@ -27,7 +38,7 @@ waitForDescendant(ServerScriptService, "Library", 10)
 waitForDescendant(ServerStorage, "Armor Accessories", 10)
 waitForDescendant(ServerStorage, "Orbs", 10)
 
-print("[Init] All critical services and assets loaded. Proceeding with module initialization...")
+--print("[Init] All critical services and assets loaded. Proceeding with module initialization...")
 
 -- === SETUP: CREATE REMOTE EVENTS ===
 
@@ -56,6 +67,14 @@ createRemoteEvent("ResumeAnimationEvent", ReplicatedStorage)
 createRemoteEvent("PlayDashSound", ReplicatedStorage)
 createRemoteEvent("PerformDash", ReplicatedStorage)
 
+-- Dungeon system RemoteEvents
+createRemoteEvent("DungeonEntryEvent", ReplicatedStorage)
+createRemoteEvent("DungeonTimerEvent", ReplicatedStorage)
+createRemoteEvent("DungeonLeaveEvent", ReplicatedStorage)
+createRemoteEvent("DungeonUIEvent", ReplicatedStorage)
+
+--print("[Init] All RemoteEvents created")
+
 -- === DASH HANDLER ===
 local PerformDashEvent = ReplicatedStorage:FindFirstChild("PerformDash")
 if PerformDashEvent then
@@ -82,11 +101,11 @@ if PerformDashEvent then
 							instance.Transparency = 1
 						end
 					end
-					print("[Init] " .. player.Name .. " dashing - made transparent, all VFX disabled")
+					--print("[Init] " .. player.Name .. " dashing - made transparent, all VFX disabled")
 					
 					-- Play dash sound in range around the player
 					SoundModule.playSoundInRange("Dash Sound Effect", position, "SFX", 50, false, 1)
-					print("[Init] Dash performed by " .. player.Name .. " - 2 mana consumed, sound played")
+					--print("[Init] Dash performed by " .. player.Name .. " - 2 mana consumed, sound played")
 					
 					-- Wait for dash duration (0.3 seconds) and restore visuals
 					task.wait(0.3)
@@ -99,10 +118,10 @@ if PerformDashEvent then
 					end
 					
 					
-					print("[Init] " .. player.Name .. " dash ended - restored transparency and VFX")
+					--print("[Init] " .. player.Name .. " dash ended - restored transparency and VFX")
 				end
 			else
-				print("[Init] Dash failed - insufficient mana for " .. player.Name)
+				--print("[Init] Dash failed - insufficient mana for " .. player.Name)
 			end
 		end)
 	end)
@@ -115,7 +134,7 @@ if PlayDashSoundEvent then
 	PlayDashSoundEvent.OnServerEvent:Connect(function(player, position)
 		-- Play dash sound in range around the player
 		SoundModule.playSoundInRange("Dash Sound Effect", position, "SFX", 50, false, 1)
-		print("[Init] Dash sound played at position: " .. tostring(position))
+		--print("[Init] Dash sound played at position: " .. tostring(position))
 	end)
 end
 
@@ -148,7 +167,15 @@ else
 	error("[Init] Failed to load EnemyStatsDataStore: " .. tostring(err))
 end
 
-
+local OrbSpiritHandler
+success, err = pcall(function()
+	OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
+end)
+if success then
+	--print("[Init] ✓ OrbSpiritHandler loaded")
+else
+	error("[Init] Failed to load OrbSpiritHandler: " .. tostring(err))
+end
 
 
 local StatsManager
@@ -239,14 +266,36 @@ else
 	error("[Init] Failed to load ItemActionHandler: " .. tostring(err))
 end
 
+local SecondaryWeaponHandler
+success, err = pcall(function()
+	SecondaryWeaponHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("SecondaryWeaponHandler"))
+end)
+if success then
+	SecondaryWeaponHandler:Initialize()
+	--print("[Init] ✓ SecondaryWeaponHandler initialized")
+else
+	error("[Init] Failed to load SecondaryWeaponHandler: " .. tostring(err))
+end
+
 local HealingCapsuleHandler
 success, err = pcall(function()
-	HealingCapsuleHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("HealingCapsuleHandler"))
+	HealingCapsuleHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Environment"):WaitForChild("HealingCapsuleHandler"))
 end)
 if success then
 
 else
 	error("[Init] Failed to load HealingCapsuleHandler: " .. tostring(err))
+end
+
+local SafeZoneHandler
+success, err = pcall(function()
+	SafeZoneHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Environment"):WaitForChild("SafeZoneHandler"))
+end)
+if success then
+	SafeZoneHandler.Initialize()
+	print("[Init] ✓ SafeZoneHandler initialized")
+else
+	error("[Init] Failed to load SafeZoneHandler: " .. tostring(err))
 end
 
 local PortalTeleportHandler
@@ -261,20 +310,20 @@ end
 
 local NPCManager
 success, err = pcall(function()
-	NPCManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("NPCManager"))
+	NPCManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("NPC"):WaitForChild("NPCManager"))
 end)
 if success then
-	print("[Init] ✅ NPCManager loaded")
+	--print("[Init] ✅ NPCManager loaded")
 else
 	warn("[Init] ⚠️ Failed to load NPCManager: " .. tostring(err))
 end
 
 local NpcQuestHandler
 success, err = pcall(function()
-	NpcQuestHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("NpcQuestHandler"))
+	NpcQuestHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("NPC"):WaitForChild("NpcQuestHandler"))
 end)
 if success then
-	print("[Init] ✅ NpcQuestHandler loaded")
+	--print("[Init] ✅ NpcQuestHandler loaded")
 else
 	warn("[Init] ⚠️ Failed to load NpcQuestHandler: " .. tostring(err))
 end
@@ -301,7 +350,7 @@ end
 
 local ProximityPromptListener
 success, err = pcall(function()
-	ProximityPromptListener = require(ServerScriptService:WaitForChild("Library"):WaitForChild("ProximityPromptListener"))
+	ProximityPromptListener = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Interaction"):WaitForChild("ProximityPromptListener"))
 end)
 if success then
 else
@@ -310,7 +359,7 @@ end
 
 local PVPHandler
 success, err = pcall(function()
-	PVPHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PVPHandler"))
+	PVPHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("PVPHandler"))
 end)
 if success then
 else
@@ -319,13 +368,24 @@ end
 
 local PlayerInteractionManager
 success, err = pcall(function()
-	PlayerInteractionManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PlayerInteractionManager"))
+	PlayerInteractionManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Interaction"):WaitForChild("PlayerInteractionManager"))
 	PlayerInteractionManager.Initialize()
 end)
 if success then
-	print("[Init] ✓ PlayerInteractionManager initialized")
+	--print("[Init] ✓ PlayerInteractionManager initialized")
 else
 	error("[Init] Failed to load PlayerInteractionManager: " .. tostring(err))
+end
+
+local DuelHandler
+success, err = pcall(function()
+	DuelHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("DuelHandler"))
+	DuelHandler.Initialize()
+end)
+if success then
+	--print("[Init] ✓ DuelHandler initialized")
+else
+	error("[Init] Failed to load DuelHandler: " .. tostring(err))
 end
 
 local PlayerNameDisplay
@@ -334,19 +394,22 @@ success, err = pcall(function()
 	PlayerNameDisplay.Initialize()
 end)
 if success then
-	print("[Init] ✓ PlayerNameDisplay initialized")
+	--print("[Init] ✓ PlayerNameDisplay initialized")
 else
 	error("[Init] Failed to load PlayerNameDisplay: " .. tostring(err))
 end
 
-local OrbSpiritHandler
+-- === ULTIMATE SYSTEM ===
+
+local UltimateHandler
 success, err = pcall(function()
-	OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+	UltimateHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("UltimateHandler"))
 end)
 if success then
-	print("[Init] ✓ OrbSpiritHandler loaded")
+	UltimateHandler.Init()
+	--print("[Init] ✓ UltimateHandler initialized")
 else
-	error("[Init] Failed to load OrbSpiritHandler: " .. tostring(err))
+	error("[Init] Failed to load UltimateHandler: " .. tostring(err))
 end
 
 -- === ENEMY SYSTEMS ===
@@ -366,16 +429,103 @@ end
 
 -- === PLAYER LIFECYCLE EVENTS ===
 
--- Handle player join
-Players.PlayerAdded:Connect(function(player)
-	local InventoryManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
-	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+print("[Init] 🔧 Setting up PlayerAdded connection...")
 
-	-- Ensure respawn listener is set up for orb VFX/slash auto-equip
+-- Handle player join (SINGLE UNIFIED HANDLER - ALL PLAYER INITIALIZATION HERE)
+Players.PlayerAdded:Connect(function(player)
+	print("[Init] 🎮 Player joined:", player.Name, "UserId:", player.UserId)
+	
+	local InventoryManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("InventoryManager"))
+	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
+	print("[Init] 📦 About to require QuestDataStore...")
+	local QuestDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("QuestDataStore"))
+	print("[Init] ✅ QuestDataStore required successfully")
+	local PortalHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("PortalHandler"))
+	local ArmorsManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("ArmorsManager"))
+	local EnemiesModule = ServerScriptService.Library.Enemies:FindFirstChild("EnemiesModule")
+	
+	-- 1. Initialize UnifiedDataStoreManager tracking
+	UnifiedDataStoreManager.initPlayerTracking(player.UserId)
+	
+	-- 2. Initialize player data FIRST (critical for all other systems)
+	-- PlayerDataStore.PlayerAdded is already connected, it creates Stats folder
+	
+	-- 3. Wait for Stats folder to be created by PlayerDataStore
+	local stats = player:WaitForChild("Stats", 10)
+	if not stats then
+		warn("[Init] Stats folder not created for", player.Name)
+		return
+	end
+	
+	-- 4. Load Quest Data
+	task.spawn(function()
+		task.wait(0.2)
+		print("[Init] 🔄 About to load quest data for", player.Name)
+		local loadSuccess, loadErr = pcall(function()
+			QuestDataStore.LoadQuestData(player)
+		end)
+		if loadSuccess then
+			print("[Init] ✓ Quests loaded for", player.Name)
+		else
+			warn("[Init] ❌ Failed to load quests for", player.Name, ":", loadErr)
+		end
+	end)
+	
+	-- 5. Initialize Inventory and Mana
+	task.spawn(function()
+		if InventoryManager and InventoryManager.InitializePlayer then
+			InventoryManager.InitializePlayer(player)
+			--print("[Init] ✓ Inventory initialized for", player.Name)
+		end
+		if ManaManager and ManaManager.InitializePlayer then
+			ManaManager.InitializePlayer(player)
+			--print("[Init] ✓ Mana initialized for", player.Name)
+		end
+	end)
+	
+	-- 6. Setup Portal Handler for this player
+	PortalHandler.SetupPlayer(player)
+	--print("[Init] ✓ Portal handler setup for", player.Name)
+	
+	-- 7. Setup Armor Manager connections
+	ArmorsManager.setupPlayerConnections(player)
+	--print("[Init] ✓ Armor manager setup for", player.Name)
+	
+	-- 8. Add player to enemy targeting group
+	if EnemiesModule then
+		local EnemiesManager = require(EnemiesModule)
+		EnemiesManager.addPlayerToGroup(player)
+		--print("[Init] ✓ Added to enemy targeting for", player.Name)
+	end
+	
+	-- 9. Setup Player Name Display
+	if PlayerNameDisplay and PlayerNameDisplay.SetupPlayer then
+		PlayerNameDisplay.SetupPlayer(player)
+		--print("[Init] ✓ Name display setup for", player.Name)
+	end
+
+	-- 10. Ensure respawn listener is set up for orb VFX/slash auto-equip
 	OrbSpiritHandler.SetupPlayerRespawnListener(player)
 
-	-- Auto-equip orb on join, EXCEPT if inventory is exactly the starter items (Twig and Normal Orb)
-	local function autoEquipOrbUnlessStarter()
+	-- Auto-equip orb on join, ONLY if no orb is already equipped
+	local function autoEquipOrbIfNeeded()
+		-- Check if player already has an equipped orb in Stats.EquippedOrb
+		local stats = player:FindFirstChild("Stats")
+		if stats then
+			local equippedOrbFolder = stats:FindFirstChild("EquippedOrb")
+			if equippedOrbFolder and equippedOrbFolder:IsA("Folder") then
+				local nameValue = equippedOrbFolder:FindFirstChild("name")
+				local idValue = equippedOrbFolder:FindFirstChild("id")
+				if nameValue and nameValue.Value ~= "" and idValue and idValue.Value ~= "" then
+					-- Player already has an orb equipped, just apply visuals
+					--print("[Init] Player " .. player.Name .. " already has equipped orb: " .. nameValue.Value .. ", applying visuals only")
+					OrbSpiritHandler.EquipOrbFromInventory(player)
+					return
+				end
+			end
+		end
+		
+		-- No equipped orb found, check if starter inventory
 		local inventory = InventoryManager.GetInventoryWithEquippedStatus(player)
 		local isStarter = false
 		if #inventory == 2 then
@@ -391,12 +541,13 @@ Players.PlayerAdded:Connect(function(player)
 				isStarter = true
 			end
 		end
+		
+		-- Only auto-equip first orb if not starter inventory
 		if not isStarter then
 			for _, item in ipairs(inventory) do
 				if item.itemType == "spirit orb" then
 					InventoryManager.setEquippedOrb(player, item.name, item.id)
-					print("[Init] Auto-equipped orb for " .. player.Name .. ": " .. item.name)
-					OrbSpiritHandler.EquipOrbFromInventory(player)
+					--print("[Init] Auto-equipped first orb for " .. player.Name .. ": " .. item.name)
 					break
 				end
 			end
@@ -411,8 +562,8 @@ Players.PlayerAdded:Connect(function(player)
 			humanoid = character:FindFirstChild("Humanoid")
 			tries = tries + 1
 		end
-		-- Only auto-equip orb if not starter inventory
-		autoEquipOrbUnlessStarter()
+		-- Auto-equip orb only if needed (respects already equipped orb)
+		autoEquipOrbIfNeeded()
 	end)
 	if player.Character then
 		local character = player.Character
@@ -423,14 +574,42 @@ Players.PlayerAdded:Connect(function(player)
 			humanoid = character:FindFirstChild("Humanoid")
 			tries = tries + 1
 		end
-		autoEquipOrbUnlessStarter()
+		autoEquipOrbIfNeeded()
 	end
+	
+	-- Fire ServerReady to this specific player after brief delay
+	task.spawn(function()
+		task.wait(0.5)
+		local serverReadyEvent = ReplicatedStorage:FindFirstChild("ServerReady")
+		if serverReadyEvent then
+			serverReadyEvent:FireClient(player)
+			--print("[Init] ✓ Fired ServerReady to", player.Name)
+		end
+	end)
 end)
+
+print("[Init] ✅ PlayerAdded connection established. Waiting for players to join...")
 
 -- Handle players who are already in the game (for fast reloads)
 for _, player in ipairs(Players:GetPlayers()) do
-	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
 	OrbSpiritHandler.SetupPlayerRespawnListener(player)
+	
+	-- Load quest data for existing players
+	local QuestDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("QuestDataStore"))
+	task.spawn(function()
+		task.wait(0.2)
+		print("[Init] 🔄 Loading quest data for early-joined player:", player.Name)
+		local loadSuccess, loadErr = pcall(function()
+			QuestDataStore.LoadQuestData(player)
+		end)
+		if loadSuccess then
+			print("[Init] ✅ Quests loaded for early-joined player:", player.Name)
+		else
+			warn("[Init] ❌ Failed to load quests for early-joined player:", player.Name, ":", loadErr)
+		end
+	end)
+	
 	-- Initialize inventory and mana for existing players
 	task.spawn(function()
 		task.wait(0.5) -- Wait for all modules to be ready
@@ -490,24 +669,12 @@ end
 
 local AdminCommandsHandler
 success, err = pcall(function()
-	AdminCommandsHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("AdminCommandsHandler"))
+	AdminCommandsHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Admin"):WaitForChild("AdminCommandsHandler"))
 end)
 if success then
-	print("[Init] ✅ AdminCommandsHandler loaded")
+	--print("[Init] ✅ AdminCommandsHandler loaded")
 else
 	warn("[Init] ⚠️ Failed to load AdminCommandsHandler: " .. tostring(err))
-end
-
--- === DUNGEON HANDLER ===
-local DungeonHandler
-local success, err = pcall(function()
-	DungeonHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("DungeonHandler"))
-end)
-if success and DungeonHandler and DungeonHandler.Init then
-	DungeonHandler.Init()
-	print("[Init] ✓ DungeonHandler initialized")
-else
-	warn("[Init] ⚠️ Failed to load DungeonHandler: " .. tostring(err))
 end
 
 -- === ITEM COLLECTION SETUP ===
@@ -517,7 +684,7 @@ end
 
 -- === SERVER READY ===
 
-print("[Init] 🎮 SERVER READY - All systems initialized")
+--print("[Init] 🎮 SERVER READY - All systems initialized")
 
 -- Fire ServerReady RemoteEvent to all clients
 local serverReadyEvent = ReplicatedStorage:FindFirstChild("ServerReady")
@@ -526,7 +693,12 @@ if not serverReadyEvent then
 	serverReadyEvent.Name = "ServerReady"
 	serverReadyEvent.Parent = ReplicatedStorage
 end
+
+-- Fire to all currently connected players
 serverReadyEvent:FireAllClients()
+print("[Init] 🎮 SERVER FULLY INITIALIZED - All systems ready!")
+
+-- NOTE: PlayerAdded handler above handles ServerReady for new players
 
 -- Keep the script running
 while true do

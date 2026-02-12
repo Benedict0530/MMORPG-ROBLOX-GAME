@@ -396,7 +396,7 @@
 
 -- player.Chatted:Connect(onPlayerChatted)
 
--- print("[AdminChat] Ready! Type /admincommands in chat to open admin panel.")
+-- --print("[AdminChat] Ready! Type /admincommands in chat to open admin panel.")
 
 -- -- Command parsing function
 -- function parseCommand(message, outputFunc)
@@ -665,4 +665,4 @@
 -- -- Start with panel hidden
 -- hideAdminChat()
 
--- print("[AdminChat] Ready! Click the ⚙️ button at the top to open admin panel")
+-- --print("[AdminChat] Ready! Click the ⚙️ button at the top to open admin panel")

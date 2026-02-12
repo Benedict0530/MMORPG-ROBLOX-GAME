@@ -26,7 +26,7 @@ function PlayerNameDisplay.HideDefaultName(player)
 	end
 	if humanoid then
 		humanoid.NameDisplayDistance = 0 -- Hide default name
-		print("[PlayerNameDisplay] Disabled default name display for:", player.Name)
+		--print("[PlayerNameDisplay] Disabled default name display for:", player.Name)
 	end
 end
 
@@ -52,11 +52,9 @@ function PlayerNameDisplay.Initialize()
 	end
 	
 	-- Setup new players
-	Players.PlayerAdded:Connect(function(player)
-		PlayerNameDisplay.SetupPlayer(player)
-	end)
+	-- PlayerAdded handler moved to Init.server.lua for centralized initialization
 	
-	print("[PlayerNameDisplay] Server: Initialized name display handler")
+	--print("[PlayerNameDisplay] Server: Initialized name display handler")
 end
 
 return PlayerNameDisplay

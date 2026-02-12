@@ -2,18 +2,18 @@
 -- Module for handling party-related interactions
 
 local ServerScriptService = game:GetService("ServerScriptService")
-local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Party"):WaitForChild("PartyDataStore"))
 
 local PartyHandler = {}
 
 -- Send party invite to another player
 function PartyHandler.InviteParty(clickingPlayer, targetPlayer)
-	print("[PartyHandler] 📨 Party Invite Function Called")
-	print("[PartyHandler] From: " .. clickingPlayer.Name .. " To: " .. targetPlayer.Name)
+	--print("[PartyHandler] 📨 Party Invite Function Called")
+	--print("[PartyHandler] From: " .. clickingPlayer.Name .. " To: " .. targetPlayer.Name)
 	
 	-- Check if target player is already in a party
 	if PartyDataStore.IsPlayerInParty(targetPlayer.UserId) then
-		print("[PartyHandler] ❌ Player " .. targetPlayer.Name .. " is already in a party")
+		--print("[PartyHandler] ❌ Player " .. targetPlayer.Name .. " is already in a party")
 		return false, nil
 	end
 	
@@ -21,7 +21,7 @@ function PartyHandler.InviteParty(clickingPlayer, targetPlayer)
 	local success = PartyDataStore.InviteToParty(clickingPlayer, targetPlayer)
 	
 	if success then
-		print("[PartyHandler] ✅ Party Invite Processed Successfully")
+		--print("[PartyHandler] ✅ Party Invite Processed Successfully")
 		
 		-- Get party info for logging
 		local partyId = PartyDataStore.GetPartyId(clickingPlayer.UserId)
@@ -37,7 +37,7 @@ function PartyHandler.InviteParty(clickingPlayer, targetPlayer)
 			return true, memberNames
 		end
 	else
-		print("[PartyHandler] ❌ Party Invite Failed")
+		--print("[PartyHandler] ❌ Party Invite Failed")
 	end
 	
 	return false, nil

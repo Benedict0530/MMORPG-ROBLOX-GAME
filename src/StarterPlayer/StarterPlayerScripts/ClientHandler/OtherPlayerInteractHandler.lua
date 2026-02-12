@@ -17,6 +17,7 @@ local playerInteractionUi = gameGui:WaitForChild("PlayerInteraction")
 local playerButton = playerInteractionUi:WaitForChild("PlayerButton")
 local playerNameLabel = playerButton:WaitForChild("PlayerNameLabel")
 local invitePartyButton = playerButton:WaitForChild("InvitePartyButton")
+local inviteDuelButton = playerButton:WaitForChild("InviteDuelButton")
 
 -- Get RemoteEvent for player interactions
 -- Center-screen message utility
@@ -88,6 +89,26 @@ local function getPartyActionEvent()
 	return ReplicatedStorage:WaitForChild("PartyActionEvent")
 end
 
+-- Get RemoteEvent for duel invitations
+local function getDuelInvitationEvent()
+	return ReplicatedStorage:WaitForChild("DuelInvitationEvent")
+end
+
+-- Get RemoteFunction for duel responses
+local function getDuelResponseFunction()
+	return ReplicatedStorage:WaitForChild("DuelResponseFunction")
+end
+
+-- Get RemoteEvent for duel started
+local function getDuelStartedEvent()
+	return ReplicatedStorage:WaitForChild("DuelStartedEvent")
+end
+
+-- Get RemoteEvent for duel ended
+local function getDuelEndedEvent()
+	return ReplicatedStorage:WaitForChild("DuelEndedEvent")
+end
+
 -- Shared function to handle player click
 local clickDebounce = false
 local CLICK_DEBOUNCE = 0.3
@@ -103,11 +124,11 @@ local function handlePlayerClick(targetPart)
 	if clickDebounce then return end
 	
 	if not targetPart then 
-		print("[OtherPlayerInteractHandler.client] DEBUG: No target part")
+		--print("[OtherPlayerInteractHandler.client] DEBUG: No target part")
 		return 
 	end
 	
-	print("[OtherPlayerInteractHandler.client] DEBUG: Clicked on " .. targetPart.Name)
+	--print("[OtherPlayerInteractHandler.client] DEBUG: Clicked on " .. targetPart.Name)
 	
 	-- Find humanoid parent
 	local character = targetPart.Parent
@@ -119,36 +140,36 @@ local function handlePlayerClick(targetPart)
 	end
 	
 	if not character or not character:FindFirstChild("Humanoid") then
-		print("[OtherPlayerInteractHandler.client] DEBUG: Not a player character")
+		--print("[OtherPlayerInteractHandler.client] DEBUG: Not a player character")
 		return
 	end
 	
 	-- Find player from character
 	local targetPlayer = Players:GetPlayerFromCharacter(character)
 	if not targetPlayer then
-		print("[OtherPlayerInteractHandler.client] DEBUG: Character is not owned by any player")
+		--print("[OtherPlayerInteractHandler.client] DEBUG: Character is not owned by any player")
 		return
 	end
 	
 	-- Prevent clicking own character
 	if targetPlayer == player then
-		print("[OtherPlayerInteractHandler.client] DEBUG: Clicked on own character")
+		--print("[OtherPlayerInteractHandler.client] DEBUG: Clicked on own character")
 		return
 	end
 	
 	-- Prevent NPC clicking
 	if character:GetAttribute("IsNPC") then
-		print("[OtherPlayerInteractHandler.client] DEBUG: Target is an NPC")
+		--print("[OtherPlayerInteractHandler.client] DEBUG: Target is an NPC")
 		return
 	end
 	
 	-- Player clicked on another player - print to client
-	print("[OtherPlayerInteractHandler.client] 🖱️ You clicked on player: " .. targetPlayer.Name)
+	--print("[OtherPlayerInteractHandler.client] 🖱️ You clicked on player: " .. targetPlayer.Name)
 	
 	-- Check if clicking the same player again - toggle UI off
 	if currentSelectedPlayer == targetPlayer then
 		hidePlayerInteractionUI()
-		print("[OtherPlayerInteractHandler.client] 👆 Same player clicked - hiding UI")
+		--print("[OtherPlayerInteractHandler.client] 👆 Same player clicked - hiding UI")
 		return
 	end
 	
@@ -156,7 +177,7 @@ local function handlePlayerClick(targetPart)
 	playerNameLabel.Text = targetPlayer.Name
 	playerInteractionUi.Visible = true
 	currentSelectedPlayer = targetPlayer
-	print("[OtherPlayerInteractHandler.client] ✅ Showing interaction UI for: " .. targetPlayer.Name)
+	--print("[OtherPlayerInteractHandler.client] ✅ Showing interaction UI for: " .. targetPlayer.Name)
 	
 	-- Prevent rapid clicks
 	clickDebounce = true
@@ -169,14 +190,14 @@ end
 local function setupMouseTargetDetection()
 	-- Listen for mouse clicks on players
 	mouse.Button1Down:Connect(function()
-		print("[OtherPlayerInteractHandler.client] DEBUG: Mouse clicked")
+		--print("[OtherPlayerInteractHandler.client] DEBUG: Mouse clicked")
 		-- Check if mouse is over something
 		if mouse.Target == nil then 
-			print("[OtherPlayerInteractHandler.client] DEBUG: Mouse.Target is nil")
+			--print("[OtherPlayerInteractHandler.client] DEBUG: Mouse.Target is nil")
 			return 
 		end
 		
-		print("[OtherPlayerInteractHandler.client] DEBUG: Mouse.Target = " .. mouse.Target.Name)
+		--print("[OtherPlayerInteractHandler.client] DEBUG: Mouse.Target = " .. mouse.Target.Name)
 		handlePlayerClick(mouse.Target)
 	end)
 	
@@ -199,31 +220,36 @@ local function setupMouseTargetDetection()
 		local distance = (selectedRoot.Position - myRoot.Position).Magnitude
 		if distance > 30 then
 			hidePlayerInteractionUI()
-			print("[OtherPlayerInteractHandler.client] 📏 Player too far away (distance: " .. math.floor(distance) .. " studs)")
+			--print("[OtherPlayerInteractHandler.client] 📏 Player too far away (distance: " .. math.floor(distance) .. " studs)")
 		end
 	end)
 	
 	-- Handle player button click
 	playerButton.MouseButton1Click:Connect(function()
 		if currentSelectedPlayer then
-			print("[OtherPlayerInteractHandler.client] 🎯 Player button clicked for: " .. currentSelectedPlayer.Name)
-			print("[OtherPlayerInteractHandler.client] Button Action: Interacting with " .. currentSelectedPlayer.Name)
+			--print("[OtherPlayerInteractHandler.client] 🎯 Player button clicked for: " .. currentSelectedPlayer.Name)
+			--print("[OtherPlayerInteractHandler.client] Button Action: Interacting with " .. currentSelectedPlayer.Name)
 			
-			-- Toggle invite party button visibility
-			if invitePartyButton.Visible then
+			-- Toggle invite buttons visibility
+			if invitePartyButton.Visible or inviteDuelButton.Visible then
 				invitePartyButton.Visible = false
-				print("[OtherPlayerInteractHandler.client] 🚫 Invite Party button hidden")
+				inviteDuelButton.Visible = false
+				--print("[OtherPlayerInteractHandler.client] 🚫 Invite buttons hidden")
 			else
 				invitePartyButton.Visible = true
-				print("[OtherPlayerInteractHandler.client] ✅ Invite Party button shown")
+				inviteDuelButton.Visible = true
+				--print("[OtherPlayerInteractHandler.client] ✅ Invite buttons shown")
 			end
 		else
-			print("[OtherPlayerInteractHandler.client] ⚠️ Button clicked but no player selected")
+			--print("[OtherPlayerInteractHandler.client] ⚠️ Button clicked but no player selected")
 		end
 	end)
 	
 	-- Handle invite party button click
 	invitePartyButton.MouseButton1Click:Connect(function()
+		print("[OtherPlayerInteractHandler.client] 👆 Party invite button clicked!")
+		print("[OtherPlayerInteractHandler.client] currentSelectedPlayer:", currentSelectedPlayer and currentSelectedPlayer.Name or "NIL")
+		
 		if currentSelectedPlayer then
 			-- Check if local player is in a party and not leader
 			local partyUI = gameGui:FindFirstChild("PartyUI")
@@ -235,17 +261,41 @@ local function setupMouseTargetDetection()
 				isLeader = true
 			end
 			if isInParty and not isLeader then
+				print("[OtherPlayerInteractHandler.client] ⚠️ Player is in party but not leader")
 				showCenterScreenMessage("Please ask the party leader to invite.")
 				return
 			end
-			print("[OtherPlayerInteractHandler.client] 📨 Sending Party Invite to: " .. currentSelectedPlayer.Name)
+			print("[OtherPlayerInteractHandler.client] 📨 Sending Party Invite to server...")
+			print("[OtherPlayerInteractHandler.client] Target:", currentSelectedPlayer.Name)
 			-- Fire event to server with interaction type and target player
 			local playerInteractionEvent = getPlayerInteractionEvent()
 			playerInteractionEvent:FireServer("Party Invite", currentSelectedPlayer)
+			-- Hide both invite buttons
 			invitePartyButton.Visible = false
+			inviteDuelButton.Visible = false
 			print("[OtherPlayerInteractHandler.client] ✅ Party Invite sent to server")
 		else
-			print("[OtherPlayerInteractHandler.client] ⚠️ Invite button clicked but no player selected")
+			print("[OtherPlayerInteractHandler.client] ⚠️ No player selected for party invite")
+		end
+	end)
+	
+	-- Handle invite duel button click
+	inviteDuelButton.MouseButton1Click:Connect(function()
+		print("[OtherPlayerInteractHandler.client] 👆 Duel invite button clicked!")
+		print("[OtherPlayerInteractHandler.client] currentSelectedPlayer:", currentSelectedPlayer and currentSelectedPlayer.Name or "NIL")
+		
+		if currentSelectedPlayer then
+			print("[OtherPlayerInteractHandler.client] ⚔️ Sending Duel Invite to server...")
+			print("[OtherPlayerInteractHandler.client] Target:", currentSelectedPlayer.Name)
+			-- Fire event to server with interaction type and target player
+			local playerInteractionEvent = getPlayerInteractionEvent()
+			playerInteractionEvent:FireServer("Duel Invite", currentSelectedPlayer)
+			-- Hide both invite buttons
+			invitePartyButton.Visible = false
+			inviteDuelButton.Visible = false
+			print("[OtherPlayerInteractHandler.client] ✅ Duel Invite sent to server")
+		else
+			print("[OtherPlayerInteractHandler.client] ⚠️ No player selected for duel invite")
 		end
 	end)
 end
@@ -258,7 +308,6 @@ local function setupPartyCreationListener()
 	
 	-- Get party UI elements
 	local partyUI = gameGui:WaitForChild("PartyUI")
-	local invitationFrame = partyUI:WaitForChild("Invitation")
 	local partyList = partyUI:WaitForChild("PartyList")
 	local playerTemplate = partyList:WaitForChild("PlayerTemplate")
     local Title = partyUI:WaitForChild("Title")
@@ -279,20 +328,20 @@ local function setupPartyCreationListener()
 	
 	-- Function to handle member template click
 	local function handleMemberTemplateClick(memberName)
-		print("[OtherPlayerInteractHandler.client] 🖱️ Clicked on party member: " .. memberName)
+		--print("[OtherPlayerInteractHandler.client] 🖱️ Clicked on party member: " .. memberName)
 		
 		-- Check if clicking the same member - toggle button visibility
 		if selectedMemberForAction == memberName then
-			print("[OtherPlayerInteractHandler.client] 🔄 Toggling button visibility for: " .. memberName)
+			--print("[OtherPlayerInteractHandler.client] 🔄 Toggling button visibility for: " .. memberName)
 			-- Only toggle the relevant button
 			if memberName == player.Name then
 				-- Toggling self click - only toggle leave button
 				leaveButton.Visible = not leaveButton.Visible
-				print("[OtherPlayerInteractHandler.client] 👁️ Leave button visible: " .. tostring(leaveButton.Visible))
+				--print("[OtherPlayerInteractHandler.client] 👁️ Leave button visible: " .. tostring(leaveButton.Visible))
 			else
 				-- Toggling other member click (leader only) - only toggle kick button
 				kickButton.Visible = not kickButton.Visible
-				print("[OtherPlayerInteractHandler.client] 👁️ Kick button visible: " .. tostring(kickButton.Visible))
+				--print("[OtherPlayerInteractHandler.client] 👁️ Kick button visible: " .. tostring(kickButton.Visible))
 			end
 			return
 		end
@@ -303,33 +352,33 @@ local function setupPartyCreationListener()
 		if currentPlayerRole == "leader" then
 			-- Leader can click any member
 			canClickMember = true
-			print("[OtherPlayerInteractHandler.client] 👑 Leader can click any member")
+			--print("[OtherPlayerInteractHandler.client] 👑 Leader can click any member")
 		elseif currentPlayerRole == "member" then
 			-- Member can only click themselves
 			if memberName == player.Name then
 				canClickMember = true
-				print("[OtherPlayerInteractHandler.client] 👤 Member can only click their own template")
+				--print("[OtherPlayerInteractHandler.client] 👤 Member can only click their own template")
 			else
-				print("[OtherPlayerInteractHandler.client] ❌ Members can only click their own template")
+				--print("[OtherPlayerInteractHandler.client] ❌ Members can only click their own template")
 				return
 			end
 		end
 		
 		if canClickMember then
 			selectedMemberForAction = memberName
-			print("[OtherPlayerInteractHandler.client] ✅ Selected member for action: " .. selectedMemberForAction)
+			--print("[OtherPlayerInteractHandler.client] ✅ Selected member for action: " .. selectedMemberForAction)
 			
 			-- Show appropriate buttons based on who is clicking
 			if memberName == player.Name then
 				-- Clicking on yourself - show only Leave button
 				leaveButton.Visible = true
 				kickButton.Visible = false
-				print("[OtherPlayerInteractHandler.client] 📋 Showing only Leave button (clicking self)")
+				--print("[OtherPlayerInteractHandler.client] 📋 Showing only Leave button (clicking self)")
 			else
 				-- Leader clicking on another member - show only Kick button
 				leaveButton.Visible = false
 				kickButton.Visible = true
-				print("[OtherPlayerInteractHandler.client] 📋 Showing only Kick button (clicking other member)")
+				--print("[OtherPlayerInteractHandler.client] 📋 Showing only Kick button (clicking other member)")
 			end
 		end
 	end
@@ -337,17 +386,17 @@ local function setupPartyCreationListener()
 	-- Function to populate party list with individual templates for each member
 	local function populatePartyList(memberNames, leaderName)
 		-- Validate member names
-		print("[OtherPlayerInteractHandler.client] 📋 populatePartyList called with " .. #memberNames .. " members: " .. table.concat(memberNames, ", "))
-		print("[OtherPlayerInteractHandler.client] 👑 Party leader: " .. leaderName)
+		--print("[OtherPlayerInteractHandler.client] 📋 populatePartyList called with " .. #memberNames .. " members: " .. table.concat(memberNames, ", "))
+		--print("[OtherPlayerInteractHandler.client] 👑 Party leader: " .. leaderName)
 		
 		-- Update party info
 		currentPartyLeader = leaderName
 		if leaderName == player.Name then
 			currentPlayerRole = "leader"
-			print("[OtherPlayerInteractHandler.client] 👑 You are the party leader")
+			--print("[OtherPlayerInteractHandler.client] 👑 You are the party leader")
 		else
 			currentPlayerRole = "member"
-			print("[OtherPlayerInteractHandler.client] 👤 You are a party member")
+			--print("[OtherPlayerInteractHandler.client] 👤 You are a party member")
 		end
 		
 		-- Find which members are new and which are removed
@@ -358,10 +407,10 @@ local function setupPartyCreationListener()
 		for _, memberName in ipairs(memberNames) do
 			if not memberTemplates[memberName] then
 				table.insert(newMembers, memberName)
-				print("[OtherPlayerInteractHandler.client] ✨ New member detected: " .. memberName)
+				--print("[OtherPlayerInteractHandler.client] ✨ New member detected: " .. memberName)
 			else
 				table.insert(existingMembers, memberName)
-				print("[OtherPlayerInteractHandler.client] ♻️ Existing member: " .. memberName)
+				--print("[OtherPlayerInteractHandler.client] ♻️ Existing member: " .. memberName)
 			end
 		end
 		
@@ -376,7 +425,7 @@ local function setupPartyCreationListener()
 			end
 			
 			if not stillInParty then
-				print("[OtherPlayerInteractHandler.client] 🗑️ Removing template for member: " .. memberName)
+				--print("[OtherPlayerInteractHandler.client] 🗑️ Removing template for member: " .. memberName)
 				template:Destroy()
 				memberTemplates[memberName] = nil
 				
@@ -384,7 +433,7 @@ local function setupPartyCreationListener()
 				if memberClickConnections[memberName] then
 					memberClickConnections[memberName]:Disconnect()
 					memberClickConnections[memberName] = nil
-					print("[OtherPlayerInteractHandler.client] 🔌 Disconnected click connection for " .. memberName)
+					--print("[OtherPlayerInteractHandler.client] 🔌 Disconnected click connection for " .. memberName)
 				end
 			end
 		end
@@ -392,7 +441,7 @@ local function setupPartyCreationListener()
 		-- Create individual template for each NEW member
 		for _, memberName in ipairs(newMembers) do
 			if memberName and memberName ~= "" then
-				print("[OtherPlayerInteractHandler.client] 🔨 Creating individual template for new member: " .. memberName)
+				--print("[OtherPlayerInteractHandler.client] 🔨 Creating individual template for new member: " .. memberName)
 				
 				-- Create fresh template instance for this member
 				local individualTemplate = playerTemplate:Clone()
@@ -418,9 +467,9 @@ local function setupPartyCreationListener()
 				-- Set the name
 				if playerNameLabel then
 					playerNameLabel.Text = memberName
-					print("[OtherPlayerInteractHandler.client] ✅ Set individual template name: " .. memberName)
+					--print("[OtherPlayerInteractHandler.client] ✅ Set individual template name: " .. memberName)
 				else
-					print("[OtherPlayerInteractHandler.client] ❌ Could not find PlayerName label for " .. memberName)
+					--print("[OtherPlayerInteractHandler.client] ❌ Could not find PlayerName label for " .. memberName)
 				end
 				
 				-- Setup click connection for this member's template
@@ -429,13 +478,13 @@ local function setupPartyCreationListener()
 						handleMemberTemplateClick(memberName)
 					end)
 					memberClickConnections[memberName] = memberClickConnection
-					print("[OtherPlayerInteractHandler.client] 🔗 Connected click handler for " .. memberName)
+					--print("[OtherPlayerInteractHandler.client] 🔗 Connected click handler for " .. memberName)
 				end
 				
 				-- Add to party list and store reference
 				individualTemplate.Parent = partyList
 				memberTemplates[memberName] = individualTemplate
-				print("[OtherPlayerInteractHandler.client] 👤 Created individual template for " .. memberName)
+				--print("[OtherPlayerInteractHandler.client] 👤 Created individual template for " .. memberName)
 			end
 		end
 		
@@ -460,7 +509,7 @@ local function setupPartyCreationListener()
 				
 				if playerNameLabel then
 					playerNameLabel.Text = memberName
-					print("[OtherPlayerInteractHandler.client] 🔄 Updated existing template: " .. memberName)
+					--print("[OtherPlayerInteractHandler.client] 🔄 Updated existing template: " .. memberName)
 				end
 			end
 		end
@@ -473,14 +522,14 @@ local function setupPartyCreationListener()
 			
 			if partyList:IsA("ScrollingFrame") then
 				partyList.CanvasSize = UDim2.new(0, partyList.AbsoluteSize.X, 0, totalHeight)
-				print("[OtherPlayerInteractHandler.client] 📏 Canvas size adjusted to height: " .. totalHeight)
+				--print("[OtherPlayerInteractHandler.client] 📏 Canvas size adjusted to height: " .. totalHeight)
 			else
 				partyList.Size = UDim2.new(partyList.Size.X.Scale, partyList.Size.X.Offset, 0, totalHeight)
-				print("[OtherPlayerInteractHandler.client] 📏 PartyList size adjusted to height: " .. totalHeight)
+				--print("[OtherPlayerInteractHandler.client] 📏 PartyList size adjusted to height: " .. totalHeight)
 			end
 		end
 		
-		print("[OtherPlayerInteractHandler.client] ✅ Party list updated with " .. memberCount .. " individual member templates")
+		--print("[OtherPlayerInteractHandler.client] ✅ Party list updated with " .. memberCount .. " individual member templates")
 	end
 	
 	-- Function to refresh member left listener with fresh connection
@@ -488,15 +537,15 @@ local function setupPartyCreationListener()
 		-- Disconnect old connection if it exists
 		if memberLeftConnection then
 			memberLeftConnection:Disconnect()
-			print("[OtherPlayerInteractHandler.client] 🔌 Disconnected old member left connection")
+			--print("[OtherPlayerInteractHandler.client] 🔌 Disconnected old member left connection")
 		end
 		
 		-- Create fresh connection with new parameters
 		memberLeftConnection = partyMemberLeftEvent.OnClientEvent:Connect(function(updatedMemberNames)
-			print("[OtherPlayerInteractHandler.client] 👋 Party member left event received. Updated members: " .. table.concat(updatedMemberNames, ", "))
+			--print("[OtherPlayerInteractHandler.client] 👋 Party member left event received. Updated members: " .. table.concat(updatedMemberNames, ", "))
 			
 			if #updatedMemberNames == 0 then
-				print("[OtherPlayerInteractHandler.client] ❌ No members left in party, hiding party list")
+				--print("[OtherPlayerInteractHandler.client] ❌ No members left in party, hiding party list")
 				partyList.Visible = false
                 Title.Visible = false
 				-- Clear all member templates since party is disbanded
@@ -508,32 +557,35 @@ local function setupPartyCreationListener()
 				end
 				memberTemplates = {}
 				memberClickConnections = {}
-				print("[OtherPlayerInteractHandler.client] 🧹 Cleared all party templates")
+				--print("[OtherPlayerInteractHandler.client] 🧹 Cleared all party templates")
 			else
 				-- Refresh entire party list with fresh member data - completely repopulate with accurate names
 				partyList.Visible = true
                 Title.Visible = true
 				populatePartyList(updatedMemberNames, currentPartyLeader)
-				print("[OtherPlayerInteractHandler.client] 🔄 Party list completely refreshed with " .. #updatedMemberNames .. " members")
+				--print("[OtherPlayerInteractHandler.client] 🔄 Party list completely refreshed with " .. #updatedMemberNames .. " members")
 			end
 		end)
 		
-		print("[OtherPlayerInteractHandler.client] 🔌 Fresh member left connection established")
+		--print("[OtherPlayerInteractHandler.client] 🔌 Fresh member left connection established")
 	end
 	
 	-- Listen for player leaving (fallback - server notification is primary)
 	Players.PlayerRemoving:Connect(function(leftPlayer)
-		print("[OtherPlayerInteractHandler.client] 👋 Local player leaving detected: " .. leftPlayer.Name)
+		--print("[OtherPlayerInteractHandler.client] 👋 Local player leaving detected: " .. leftPlayer.Name)
 		-- Server will handle party list updates via PartyMemberLeftEvent
 	end)
 	
 	-- Listen for party creation notification from server
 	partyCreatedEvent.OnClientEvent:Connect(function(memberNames, leaderName)
-		print("[OtherPlayerInteractHandler.client] 🎉 Party created event received with members: " .. table.concat(memberNames, ", "))
-		print("[OtherPlayerInteractHandler.client] 👑 Party leader: " .. leaderName)
+		--print("[OtherPlayerInteractHandler.client] 🎉 Party created event received with members: " .. table.concat(memberNames, ", "))
+		--print("[OtherPlayerInteractHandler.client] 👑 Party leader: " .. leaderName)
 		
-		-- Hide invitation UI if visible
-		invitationFrame.Visible = false
+		-- Hide invitation UI if visible (shared InvitationUI under GameGui)
+		local invitationUI = gameGui:FindFirstChild("InvitationUI")
+		if invitationUI then
+			invitationUI.Visible = false
+		end
 		
 		-- Show party list and populate it
 		partyList.Visible = true
@@ -544,21 +596,21 @@ local function setupPartyCreationListener()
 			setupMemberLeftListener()
 		end
 		
-		print("[OtherPlayerInteractHandler.client] 📋 Party list displayed for all players")
+		--print("[OtherPlayerInteractHandler.client] 📋 Party list displayed for all players")
 	end)
 	
 	-- Handle Leave button click
 	leaveButton.MouseButton1Click:Connect(function()
 		if selectedMemberForAction then
 			if currentPlayerRole == "leader" then
-				print("[OtherPlayerInteractHandler.client] 👑 Leader leaving - disbanding entire party")
+				--print("[OtherPlayerInteractHandler.client] 👑 Leader leaving - disbanding entire party")
 				partyActionEvent:FireServer("disband", nil)
 				partyList.Visible = false
 				leaveButton.Visible = false
 				kickButton.Visible = false
                 Title.Visible = false
 			else
-				print("[OtherPlayerInteractHandler.client] 👤 Member leaving party")
+				--print("[OtherPlayerInteractHandler.client] 👤 Member leaving party")
 				partyActionEvent:FireServer("leave", nil)
 				partyList.Visible = false
 				leaveButton.Visible = false
@@ -567,99 +619,356 @@ local function setupPartyCreationListener()
 			end
 			selectedMemberForAction = nil
 		else
-			print("[OtherPlayerInteractHandler.client] ⚠️ No member selected for leave action")
+			--print("[OtherPlayerInteractHandler.client] ⚠️ No member selected for leave action")
 		end
 	end)
 	
 	-- Handle Kick button click
 	kickButton.MouseButton1Click:Connect(function()
 		if selectedMemberForAction and currentPlayerRole == "leader" then
-			print("[OtherPlayerInteractHandler.client] 👑 Leader kicking member: " .. selectedMemberForAction)
+			--print("[OtherPlayerInteractHandler.client] 👑 Leader kicking member: " .. selectedMemberForAction)
 			partyActionEvent:FireServer("kick", selectedMemberForAction)
 			kickButton.Visible = false
 			selectedMemberForAction = nil
 		else
-			print("[OtherPlayerInteractHandler.client] ❌ Cannot kick - only leaders can kick members")
+			--print("[OtherPlayerInteractHandler.client] ❌ Cannot kick - only leaders can kick members")
 		end
 	end)
 	
-	print("[OtherPlayerInteractHandler.client] 🎪 Party creation listener ready")
+	--print("[OtherPlayerInteractHandler.client] 🎪 Party creation listener ready")
 end
+
+-- Shared invitation UI connection tracking
+local currentInvitationAcceptConnection = nil
+local currentInvitationDeclineConnection = nil
 
 -- Setup party invitation listener
 local function setupPartyInvitationListener()
-	local partyInvitationEvent = ReplicatedStorage:WaitForChild("PartyInvitationEvent")
-	local partyResponseFunction = getPartyResponseFunction()
+	print("[OtherPlayerInteractHandler.client] 🔧 Setting up party invitation listener...")
 	
-	-- Get party UI elements
+	local partyInvitationEvent = ReplicatedStorage:WaitForChild("PartyInvitationEvent")
+	print("[OtherPlayerInteractHandler.client] ✅ PartyInvitationEvent found")
+	
+	local partyResponseFunction = getPartyResponseFunction()
+	print("[OtherPlayerInteractHandler.client] ✅ PartyResponseFunction found")
+	
+	-- Get party invitation UI elements (using shared InvitationUI under GameGui)
+	local invitationFrame = gameGui:FindFirstChild("InvitationUI")
+	if not invitationFrame then
+		print("[OtherPlayerInteractHandler.client] ❌ ERROR: InvitationUI not found under GameGui!")
+		return
+	else
+		print("[OtherPlayerInteractHandler.client] ✅ InvitationUI found")
+	end
+	
+	local invitationLabel = invitationFrame:FindFirstChild("TextLabel")
+	if not invitationLabel then
+		print("[OtherPlayerInteractHandler.client] ❌ ERROR: TextLabel not found in InvitationUI!")
+		return
+	else
+		print("[OtherPlayerInteractHandler.client] ✅ TextLabel found")
+	end
+	
+	local acceptButton = invitationFrame:FindFirstChild("Accept")
+	if not acceptButton then
+		print("[OtherPlayerInteractHandler.client] ❌ ERROR: Accept button not found in InvitationUI!")
+		return
+	else
+		print("[OtherPlayerInteractHandler.client] ✅ Accept button found")
+	end
+	
+	local declineButton = invitationFrame:FindFirstChild("Decline")
+	if not declineButton then
+		print("[OtherPlayerInteractHandler.client] ❌ ERROR: Decline button not found in InvitationUI!")
+		return
+	else
+		print("[OtherPlayerInteractHandler.client] ✅ Decline button found")
+	end
+	
+	-- Get party UI elements for template
 	local partyUI = gameGui:WaitForChild("PartyUI")
-	local invitationFrame = partyUI:WaitForChild("Invitation")
-	local invitationLabel = invitationFrame:WaitForChild("TextLabel")
-	local acceptButton = invitationFrame:WaitForChild("Accept")
-	local declineButton = invitationFrame:WaitForChild("Decline")
 	local partyList = partyUI:WaitForChild("PartyList")
 	local playerTemplate = partyList:WaitForChild("PlayerTemplate")
 	
 	-- Hide the default template
 	playerTemplate.Visible = false
-	print("[OtherPlayerInteractHandler.client] 🚫 Default PlayerTemplate hidden")
+	print("[OtherPlayerInteractHandler.client] ✅ Party invitation UI setup complete")
 	
 	-- Listen for party invitations
 	partyInvitationEvent.OnClientEvent:Connect(function(inviterPlayer, errorType)
+		print("[OtherPlayerInteractHandler.client] 🔔 PARTY INVITATION RECEIVED!")
+		print("[OtherPlayerInteractHandler.client] Inviter:", inviterPlayer and inviterPlayer.Name or "NIL")
+		print("[OtherPlayerInteractHandler.client] ErrorType:", errorType or "NIL")
+		
 		if errorType == "AlreadyInParty" then
+			print("[OtherPlayerInteractHandler.client] ⚠️ Player already in party")
 			showCenterScreenMessage(inviterPlayer.DisplayName .. " is already in a party.")
 			return
 		end
-		print("[OtherPlayerInteractHandler.client] 🔔 Party invitation received from: " .. inviterPlayer.Name)
         
+		-- Disconnect any existing invitation connections
+		if currentInvitationAcceptConnection then
+			print("[OtherPlayerInteractHandler.client] Disconnecting old accept connection")
+			currentInvitationAcceptConnection:Disconnect()
+			currentInvitationAcceptConnection = nil
+		end
+		if currentInvitationDeclineConnection then
+			print("[OtherPlayerInteractHandler.client] Disconnecting old decline connection")
+			currentInvitationDeclineConnection:Disconnect()
+			currentInvitationDeclineConnection = nil
+		end
+		
 		-- Update invitation label text
-		invitationLabel.Text = inviterPlayer.Name .. " invited you to join a party"
+		local inviteText = inviterPlayer.Name .. " invited you to join a party"
+		print("[OtherPlayerInteractHandler.client] Setting invitation text:", inviteText)
+		invitationLabel.Text = inviteText
         
 		-- Show invitation UI
+		print("[OtherPlayerInteractHandler.client] Setting InvitationUI.Visible = true")
 		invitationFrame.Visible = true
-		print("[OtherPlayerInteractHandler.client] ✅ Invitation UI displayed")
+		print("[OtherPlayerInteractHandler.client] ✅ Party Invitation UI should now be visible!")
         
 		-- Handle accept button click
-		local acceptConnection
-		acceptConnection = acceptButton.MouseButton1Click:Connect(function()
-			acceptConnection:Disconnect()
-			print("[OtherPlayerInteractHandler.client] ✅ Party invitation accepted from " .. inviterPlayer.Name)
+		currentInvitationAcceptConnection = acceptButton.MouseButton1Click:Connect(function()
+			if currentInvitationAcceptConnection then
+				currentInvitationAcceptConnection:Disconnect()
+				currentInvitationAcceptConnection = nil
+			end
+			if currentInvitationDeclineConnection then
+				currentInvitationDeclineConnection:Disconnect()
+				currentInvitationDeclineConnection = nil
+			end
+			--print("[OtherPlayerInteractHandler.client] ✅ Party invitation accepted from " .. inviterPlayer.Name)
             
 			-- Send response to server
 			local response = partyResponseFunction:InvokeServer(inviterPlayer, "Accept")
             
 			if response then
-				print("[OtherPlayerInteractHandler.client] 🎉 Successfully sent acceptance to server")
+				--print("[OtherPlayerInteractHandler.client] 🎉 Successfully sent acceptance to server")
 				-- Party list will be shown via PartyCreatedEvent
 			else
-				print("[OtherPlayerInteractHandler.client] ❌ Failed to accept party invitation")
+				--print("[OtherPlayerInteractHandler.client] ❌ Failed to accept party invitation")
 			end
 		end)
         
 		-- Handle decline button click
-		local declineConnection
-		declineConnection = declineButton.MouseButton1Click:Connect(function()
-			declineConnection:Disconnect()
-			print("[OtherPlayerInteractHandler.client] ❌ Party invitation declined from " .. inviterPlayer.Name)
+		currentInvitationDeclineConnection = declineButton.MouseButton1Click:Connect(function()
+			if currentInvitationAcceptConnection then
+				currentInvitationAcceptConnection:Disconnect()
+				currentInvitationAcceptConnection = nil
+			end
+			if currentInvitationDeclineConnection then
+				currentInvitationDeclineConnection:Disconnect()
+				currentInvitationDeclineConnection = nil
+			end
+			--print("[OtherPlayerInteractHandler.client] ❌ Party invitation declined from " .. inviterPlayer.Name)
             
 			-- Send response to server
 			partyResponseFunction:InvokeServer(inviterPlayer, "Decline")
             
 			-- Hide invitation UI
 			invitationFrame.Visible = false
-			print("[OtherPlayerInteractHandler.client] 🚫 Invitation UI hidden")
+			--print("[OtherPlayerInteractHandler.client] 🚫 Invitation UI hidden")
 		end)
 	end)
 	
-	print("[OtherPlayerInteractHandler.client] 📨 Party invitation listener ready")
+	--print("[OtherPlayerInteractHandler.client] 📨 Party invitation listener ready")
+end
+
+-- Setup duel invitation listener
+local function setupDuelInvitationListener()
+	print("[OtherPlayerInteractHandler.client] 🔧 Setting up duel invitation listener...")
+	
+	local duelInvitationEvent = getDuelInvitationEvent()
+	print("[OtherPlayerInteractHandler.client] ✅ DuelInvitationEvent found")
+	
+	local duelResponseFunction = getDuelResponseFunction()
+	print("[OtherPlayerInteractHandler.client] ✅ DuelResponseFunction found")
+	
+	-- Get duel invitation UI elements (under GameGui directly)
+	local duelInvitationFrame = gameGui:FindFirstChild("InvitationUI")
+	if not duelInvitationFrame then
+		print("[OtherPlayerInteractHandler.client] ❌ ERROR: InvitationUI not found under GameGui for duel!")
+		return
+	else
+		print("[OtherPlayerInteractHandler.client] ✅ InvitationUI found for duel")
+	end
+	
+	local invitationLabel = duelInvitationFrame:FindFirstChild("TextLabel")
+	if not invitationLabel then
+		print("[OtherPlayerInteractHandler.client] ❌ ERROR: TextLabel not found in InvitationUI for duel!")
+		return
+	end
+	
+	local acceptButton = duelInvitationFrame:FindFirstChild("Accept")
+	if not acceptButton then
+		print("[OtherPlayerInteractHandler.client] ❌ ERROR: Accept button not found in InvitationUI for duel!")
+		return
+	end
+	
+	local declineButton = duelInvitationFrame:FindFirstChild("Decline")
+	if not declineButton then
+		print("[OtherPlayerInteractHandler.client] ❌ ERROR: Decline button not found in InvitationUI for duel!")
+		return
+	end
+	
+	print("[OtherPlayerInteractHandler.client] ✅ Duel invitation UI setup complete")
+	
+	-- Listen for duel invitations
+	duelInvitationEvent.OnClientEvent:Connect(function(inviterPlayer, errorType)
+		print("[OtherPlayerInteractHandler.client] ⚔️ DUEL INVITATION RECEIVED!")
+		print("[OtherPlayerInteractHandler.client] Inviter:", inviterPlayer and inviterPlayer.Name or "NIL")
+		print("[OtherPlayerInteractHandler.client] ErrorType:", errorType or "NIL")
+		
+		if errorType == "AlreadyInDuel" then
+			print("[OtherPlayerInteractHandler.client] ⚠️ Player already in duel")
+			showCenterScreenMessage(inviterPlayer.DisplayName .. " is already in a duel.")
+			return
+		elseif errorType == "HasPendingInvite" then
+			print("[OtherPlayerInteractHandler.client] ⚠️ Player has pending invite")
+			showCenterScreenMessage(inviterPlayer.DisplayName .. " already has a pending invitation.")
+			return
+		end
+		
+		-- Disconnect any existing invitation connections
+		if currentInvitationAcceptConnection then
+			print("[OtherPlayerInteractHandler.client] Disconnecting old accept connection")
+			currentInvitationAcceptConnection:Disconnect()
+			currentInvitationAcceptConnection = nil
+		end
+		if currentInvitationDeclineConnection then
+			print("[OtherPlayerInteractHandler.client] Disconnecting old decline connection")
+			currentInvitationDeclineConnection:Disconnect()
+			currentInvitationDeclineConnection = nil
+		end
+		
+		-- Update invitation label text
+		local duelText = inviterPlayer.Name .. " challenged you to a duel!"
+		print("[OtherPlayerInteractHandler.client] Setting invitation text:", duelText)
+		invitationLabel.Text = duelText
+		
+		-- Show invitation UI
+		print("[OtherPlayerInteractHandler.client] Setting InvitationUI.Visible = true")
+		duelInvitationFrame.Visible = true
+		print("[OtherPlayerInteractHandler.client] ✅ Duel Invitation UI should now be visible!")
+		
+		-- Handle accept button click
+		currentInvitationAcceptConnection = acceptButton.MouseButton1Click:Connect(function()
+			if currentInvitationAcceptConnection then
+				currentInvitationAcceptConnection:Disconnect()
+				currentInvitationAcceptConnection = nil
+			end
+			if currentInvitationDeclineConnection then
+				currentInvitationDeclineConnection:Disconnect()
+				currentInvitationDeclineConnection = nil
+			end
+			--print("[OtherPlayerInteractHandler.client] ✅ Duel invitation accepted from " .. inviterPlayer.Name)
+			
+			-- Send response to server
+			local response = duelResponseFunction:InvokeServer(inviterPlayer, "Accept")
+			
+			if response then
+				--print("[OtherPlayerInteractHandler.client] ⚔️ Successfully sent acceptance to server")
+				showCenterScreenMessage("Duel starting with " .. inviterPlayer.Name .. "!")
+			else
+				--print("[OtherPlayerInteractHandler.client] ❌ Failed to accept duel invitation")
+			end
+			
+			-- Hide invitation UI
+			duelInvitationFrame.Visible = false
+		end)
+		
+		-- Handle decline button click
+		currentInvitationDeclineConnection = declineButton.MouseButton1Click:Connect(function()
+			if currentInvitationAcceptConnection then
+				currentInvitationAcceptConnection:Disconnect()
+				currentInvitationAcceptConnection = nil
+			end
+			if currentInvitationDeclineConnection then
+				currentInvitationDeclineConnection:Disconnect()
+				currentInvitationDeclineConnection = nil
+			end
+			--print("[OtherPlayerInteractHandler.client] ❌ Duel invitation declined from " .. inviterPlayer.Name)
+			
+			-- Send response to server
+			duelResponseFunction:InvokeServer(inviterPlayer, "Decline")
+			
+			-- Hide invitation UI
+			duelInvitationFrame.Visible = false
+			--print("[OtherPlayerInteractHandler.client] 🚫 Duel Invitation UI hidden")
+		end)
+	end)
+	
+	--print("[OtherPlayerInteractHandler.client] ⚔️ Duel invitation listener ready")
+end
+
+-- Setup duel end listener
+local function setupDuelEndListener()
+	local duelEndedEvent = getDuelEndedEvent()
+	
+	duelEndedEvent.OnClientEvent:Connect(function(winnerId, reason)
+		if winnerId then
+			local winner = game.Players:GetPlayerByUserId(winnerId)
+			if winner then
+				if winner == player then
+					if reason == "death" then
+						showCenterScreenMessage("Victory! Your opponent was defeated!", 3)
+					elseif reason == "left_game" then
+						showCenterScreenMessage("Victory! Your opponent left the game!", 3)
+					else
+						showCenterScreenMessage("Victory! You won the duel!", 3)
+					end
+				else
+					if reason == "death" then
+						showCenterScreenMessage("Defeat! You were defeated by " .. winner.Name .. "!", 3)
+					elseif reason == "left_game" then
+						showCenterScreenMessage("Defeat! You left the duel!", 3)
+					else
+						showCenterScreenMessage("Defeat! " .. winner.Name .. " won the duel!", 3)
+					end
+				end
+			end
+		else
+			-- Draw - show reason-specific message
+			if reason == "different_maps" then
+				showCenterScreenMessage("Draw! Duel cancelled - players in different maps", 3)
+			elseif reason == "safe_zone" then
+				showCenterScreenMessage("Draw! Duel cancelled - players in safe zone", 3)
+			else
+				showCenterScreenMessage("Draw! Duel ended", 3)
+			end
+		end
+	end)
+	
+	--print("[OtherPlayerInteractHandler.client] ⚔️ Duel end listener ready")
 end
 
 -- Initialize
 local function Initialize()
 	print("[OtherPlayerInteractHandler.client] 🎯 Initializing player click detection...")
+	print("[OtherPlayerInteractHandler.client] GameGui:", gameGui)
+	print("[OtherPlayerInteractHandler.client] Checking for InvitationUI...")
+	local invitationUI = gameGui:FindFirstChild("InvitationUI")
+	if invitationUI then
+		print("[OtherPlayerInteractHandler.client] ✅ InvitationUI exists in GameGui")
+		print("[OtherPlayerInteractHandler.client] InvitationUI.Visible:", invitationUI.Visible)
+		print("[OtherPlayerInteractHandler.client] InvitationUI children:")
+		for _, child in ipairs(invitationUI:GetChildren()) do
+			print("  -", child.Name, "(", child.ClassName, ")")
+		end
+	else
+		print("[OtherPlayerInteractHandler.client] ❌ InvitationUI NOT FOUND in GameGui!")
+		print("[OtherPlayerInteractHandler.client] GameGui children:")
+		for _, child in ipairs(gameGui:GetChildren()) do
+			print("  -", child.Name)
+		end
+	end
+	
 	setupMouseTargetDetection()
 	setupPartyCreationListener()
 	setupPartyInvitationListener()
+	setupDuelInvitationListener()
+	setupDuelEndListener()
 	print("[OtherPlayerInteractHandler.client] ✅ Player click detection ready!")
 end
 

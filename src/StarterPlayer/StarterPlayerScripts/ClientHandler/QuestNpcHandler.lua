@@ -105,7 +105,7 @@ local function createQuestIndicatorBillboard(npc, mapName)
 	corner.CornerRadius = UDim.new(0, 6)
 	corner.Parent = textLabel
 	
-	print("[QuestNpcHandler] ✅ Quest indicator created for", npc.Name)
+	--print("[QuestNpcHandler] ✅ Quest indicator created for", npc.Name)
 end
 
 -- Function to update quest progress GUI
@@ -148,7 +148,7 @@ local function updateQuestProgressGui(questId)
 		if missionText then
 			local finalText = table.concat(progressLines, "\n")
 			missionText.Text = finalText
-			print("[QuestNpcHandler] ✅ Updated progress GUI:", finalText)
+			--print("[QuestNpcHandler] ✅ Updated progress GUI:", finalText)
 		end
 	end
 end
@@ -156,12 +156,12 @@ end
 
 -- Function to scan all maps and create quest indicators on NPCs
 local function scanAndCreateQuestIndicators()
-	print("[QuestNpcHandler] Scanning for quest NPCs to create indicators...")
+	--print("[QuestNpcHandler] Scanning for quest NPCs to create indicators...")
 	local workspace = game:GetService("Workspace")
 	local mapsFolder = workspace:FindFirstChild("Maps")
 	
 	if not mapsFolder then
-		print("[QuestNpcHandler] ⚠️ No 'Maps' folder found in Workspace")
+		--print("[QuestNpcHandler] ⚠️ No 'Maps' folder found in Workspace")
 		return
 	end
 	
@@ -178,7 +178,7 @@ local function scanAndCreateQuestIndicators()
 		end
 	end
 	
-	print("[QuestNpcHandler] ✅ Created quest indicators for", count, "NPCs")
+	--print("[QuestNpcHandler] ✅ Created quest indicators for", count, "NPCs")
 end
 
 -- Function to show quest progress GUI for active quest
@@ -198,7 +198,7 @@ local function showQuestProgress(questId)
 			local function onQuestComplete()
 				questProgressGui.Visible = false
 				questGui.Visible = false -- Also hide the button panel
-				print("[QuestNpcHandler] ✅ Quest completed - hiding progress GUI and buttons")
+				--print("[QuestNpcHandler] ✅ Quest completed - hiding progress GUI and buttons")
 				
 				-- Disconnect all connections
 				for _, conn in pairs(connections) do
@@ -208,7 +208,7 @@ local function showQuestProgress(questId)
 				-- Refresh quest indicators for next quest
 				task.wait(0.2)
 				scanAndCreateQuestIndicators()
-				print("[QuestNpcHandler] 🔄 Quest indicators refreshed after completion")
+				--print("[QuestNpcHandler] 🔄 Quest indicators refreshed after completion")
 			end
 			
 			-- Monitor the status value directly for completion
@@ -263,7 +263,7 @@ local function showQuestProgress(questId)
 						-- (not just on subsequent changes)
 						task.defer(function()
 							updateQuestProgressGui(questId)
-							print("[QuestNpcHandler] 📊 Updated GUI after new ObjectiveProgress value created:", child.Name)
+							--print("[QuestNpcHandler] 📊 Updated GUI after new ObjectiveProgress value created:", child.Name)
 						end)
 					end
 				end
@@ -282,7 +282,7 @@ task.delay(1, function()
 				if statusValue and (statusValue.Value == "accepted" or statusValue.Value == "active") then
 					local questId = tonumber(string.sub(questValue.Name, 7))
 					showQuestProgress(questId)
-					print("[QuestNpcHandler] 📊 Showing existing active quest progress GUI for quest", questId)
+					--print("[QuestNpcHandler] 📊 Showing existing active quest progress GUI for quest", questId)
 					break -- Only show first active quest
 				end
 			end
@@ -300,7 +300,7 @@ local function setupQuestMonitoring()
 	questFolder.ChildAdded:Connect(function()
 		task.wait(0.2)
 		scanAndCreateQuestIndicators()
-		print("[QuestNpcHandler] 🔄 Quest indicators refreshed (new quest added)")
+		--print("[QuestNpcHandler] 🔄 Quest indicators refreshed (new quest added)")
 	end)
 	
 	-- Monitor each quest's status value for changes
@@ -311,7 +311,7 @@ local function setupQuestMonitoring()
 				statusValue.Changed:Connect(function()
 					task.wait(0.1) -- Small delay to ensure value is propagated
 					scanAndCreateQuestIndicators()
-					print("[QuestNpcHandler] 🔄 Quest indicators refreshed (status changed)")
+					--print("[QuestNpcHandler] 🔄 Quest indicators refreshed (status changed)")
 				end)
 			end
 		end
@@ -379,7 +379,7 @@ local function createGreetingBillboard(npc, mapName)
 	local greetingText = "Hello traveler\nwelcome to " .. mapName
 	typeText(textLabel, greetingText, 0.05)
 	
-	print("[QuestNpcHandler] ✅ BillboardGui created with typing animation")
+	--print("[QuestNpcHandler] ✅ BillboardGui created with typing animation")
 end
 
 -- Function to check if quest is completed
@@ -469,11 +469,11 @@ end
 
 -- Listen for server events
 QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
-	print("[QuestNpcHandler] 🎯 Received quest NPC interaction!")
-	print("[QuestNpcHandler] NPC Name:", data.npcName)
-	print("[QuestNpcHandler] Map Name:", data.mapName)
-	print("[QuestNpcHandler] Position:", data.position)
-	print("[QuestNpcHandler] ✅ Player interacted with", data.npcName, "in", data.mapName)
+	--print("[QuestNpcHandler] 🎯 Received quest NPC interaction!")
+	--print("[QuestNpcHandler] NPC Name:", data.npcName)
+	--print("[QuestNpcHandler] Map Name:", data.mapName)
+	--print("[QuestNpcHandler] Position:", data.position)
+	--print("[QuestNpcHandler] ✅ Player interacted with", data.npcName, "in", data.mapName)
 	
 	-- Track current dialogue index
 	local currentDialogueIndex = 1
@@ -491,7 +491,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 		local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
 		if proximityPrompt then
 			proximityPrompt.Enabled = false
-			print("[QuestNpcHandler] ✅ ProximityPrompt disabled")
+			--print("[QuestNpcHandler] ✅ ProximityPrompt disabled")
 		end
 	end
 	
@@ -509,11 +509,11 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 	local questIsAccepted = quest and isQuestAccepted(quest.questId) or false
 	local questIsCompleted = quest and isQuestCompleted(quest.questId) or false
 	
-	print("[QuestNpcHandler] Quest Chain Status:")
-	print("  - All quests completed:", allQuestsCompleted)
-	print("  - Current quest ID:", quest and quest.questId or "NONE")
-	print("  - Current quest accepted:", questIsAccepted)
-	print("  - Current quest completed:", questIsCompleted)
+	--print("[QuestNpcHandler] Quest Chain Status:")
+	--print("  - All quests completed:", allQuestsCompleted)
+	--print("  - Current quest ID:", quest and quest.questId or "NONE")
+	--print("  - Current quest accepted:", questIsAccepted)
+	--print("  - Current quest completed:", questIsCompleted)
 	
 	-- If quest is already accepted or completed, show special message
 	local head = data.npc:FindFirstChild("Head")
@@ -539,9 +539,9 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 			QuestButton = QuestButton,
 			GoodByeButton = GoodByeButton
 		})
-		print("[QuestNpcHandler] 🖱️ Button hover animations enabled")
+		--print("[QuestNpcHandler] 🖱️ Button hover animations enabled")
 	else
-		print("[QuestNpcHandler] 📱 Touch device detected - button animations disabled")
+		--print("[QuestNpcHandler] 📱 Touch device detected - button animations disabled")
 	end
 	
 	-- Set default button states
@@ -551,16 +551,16 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 	GoodByeButton.Text = "Goodbye"
 	GoodByeButton.Active = true
 	GoodByeButton.Visible = true
-	print("[QuestNpcHandler] ✅ Default button states set")
+	--print("[QuestNpcHandler] ✅ Default button states set")
 	
 	-- If all quests completed, hide Quest button
 	if allQuestsCompleted then
 		QuestButton.Visible = false
-		print("[QuestNpcHandler] ⚠️ All quests completed - hiding Quest button")
+		--print("[QuestNpcHandler] ⚠️ All quests completed - hiding Quest button")
 	-- If current quest is already accepted, hide Quest button
 	elseif questIsAccepted then
 		QuestButton.Visible = false
-		print("[QuestNpcHandler] ⚠️ Quest already accepted - hiding Quest button")
+		--print("[QuestNpcHandler] ⚠️ Quest already accepted - hiding Quest button")
 	end
 	
 	-- Track button states
@@ -580,18 +580,18 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 		if isProcessing then return end -- Prevent button spam
 		isProcessing = true
 		
-		print("[QuestNpcHandler] ✅ Clicked: QuestButton")
+		--print("[QuestNpcHandler] ✅ Clicked: QuestButton")
 		
 		-- Get quest data - get NEXT available quest in chain
 		local quest = NpcQuestData.GetNextAvailableQuestByMapName(data.mapName, player)
-		print("[QuestNpcHandler] Quest found:", quest ~= nil, "for map:", data.mapName)
+		--print("[QuestNpcHandler] Quest found:", quest ~= nil, "for map:", data.mapName)
 		
 		if quest then
 			if not questStarted then
 				-- Check if prerequisites are met for this map
 				if not checkMapPrerequisites(data.mapName) then
 					local prereqMap = getPrerequisiteMap(data.mapName)
-					print("[QuestNpcHandler] ⚠️ Player must complete all quests in", prereqMap, "first!")
+					--print("[QuestNpcHandler] ⚠️ Player must complete all quests in", prereqMap, "first!")
 					
 					local head = data.npc:FindFirstChild("Head")
 					if head then
@@ -614,7 +614,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 						local greetingGui = head:FindFirstChild("GreetingGui")
 						if greetingGui then
 							greetingGui:Destroy()
-							print("[QuestNpcHandler] 🗑️ Billboard destroyed")
+							--print("[QuestNpcHandler] 🗑️ Billboard destroyed")
 						end
 					end
 					
@@ -624,7 +624,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 						local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
 						if proximityPrompt then
 							proximityPrompt.Enabled = true
-							print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
+							--print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
 						end
 					end
 					
@@ -640,7 +640,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 				QuestButton.Active = false
 				GoodByeButton.Text = ""
 				GoodByeButton.Active = false
-				print("[QuestNpcHandler] All buttons cleared and deactivated")
+				--print("[QuestNpcHandler] All buttons cleared and deactivated")
 				
 				-- Find dialogue label in the billboard GUI
 				local head = data.npc:FindFirstChild("Head")
@@ -648,7 +648,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 					local greetingGui = head:FindFirstChild("GreetingGui")
 					if greetingGui then
 						local dialogueLabel = greetingGui:FindFirstChildOfClass("TextLabel")
-						print("[QuestNpcHandler] Dialogue label found:", dialogueLabel ~= nil)
+						--print("[QuestNpcHandler] Dialogue label found:", dialogueLabel ~= nil)
 						
 						if dialogueLabel then
 							-- Show first dialogue
@@ -658,7 +658,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 							local firstDialogue = quest.dialogue[1]
 							local dialogueText = firstDialogue.npc .. ":\n" .. firstDialogue.text
 							
-							print("[QuestNpcHandler] Displaying dialogue 1 of", #quest.dialogue)
+							--print("[QuestNpcHandler] Displaying dialogue 1 of", #quest.dialogue)
 							typeText(dialogueLabel, dialogueText, 0.02)
 							
 							-- Show 2 buttons: NEXT and Never mind
@@ -670,13 +670,13 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 							GoodByeButton.Text = "Never mind"
 							GoodByeButton.Active = true
 							GoodByeButton.Visible = true
-							print("[QuestNpcHandler] ✅ Showing NEXT and Never mind buttons")
+							--print("[QuestNpcHandler] ✅ Showing NEXT and Never mind buttons")
 						end
 					end
 				end
 			elseif QuestButton.Text == "NEXT" then
 				-- NEXT button clicked - show second dialogue
-				print("[QuestNpcHandler] ✅ Clicked: NEXT button")
+				--print("[QuestNpcHandler] ✅ Clicked: NEXT button")
 				
 				-- Clear and deactivate buttons
 				QuestButton.Text = ""
@@ -684,7 +684,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 
 				GoodByeButton.Text = ""
 				GoodByeButton.Active = false
-				print("[QuestNpcHandler] All buttons cleared and deactivated")
+				--print("[QuestNpcHandler] All buttons cleared and deactivated")
 				
 				-- Get quest data
 				local head = data.npc:FindFirstChild("Head")
@@ -700,7 +700,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 							local secondDialogue = quest.dialogue[2]
 							local dialogueText = secondDialogue.npc .. ":\n" .. secondDialogue.text
 							
-							print("[QuestNpcHandler] Displaying dialogue 2 of", #quest.dialogue)
+							--print("[QuestNpcHandler] Displaying dialogue 2 of", #quest.dialogue)
 							typeText(dialogueLabel, dialogueText, 0.02)
 							
 						-- Show 2 buttons: Accept and Never mind
@@ -713,18 +713,18 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 							GoodByeButton.Text = "Never mind"
 							GoodByeButton.Active = true
 							GoodByeButton.Visible = true
-							print("[QuestNpcHandler] ✅ Showing accept and never mind buttons")
+							--print("[QuestNpcHandler] ✅ Showing accept and never mind buttons")
 							end
 						end
 					end
 				end
 			elseif QuestButton.Text == "I'll take care of them" then
 				-- Accept button clicked - accept the quest
-				print("[QuestNpcHandler] ✅ Clicked: I'll take care of them")
+				--print("[QuestNpcHandler] ✅ Clicked: I'll take care of them")
 				
 				-- Check if player already has an active quest
 				if hasActiveQuest() then
-					print("[QuestNpcHandler] ⚠️ Player already has an active quest!")
+					--print("[QuestNpcHandler] ⚠️ Player already has an active quest!")
 					local head = data.npc:FindFirstChild("Head")
 					if head then
 						local greetingGui = head:FindFirstChild("GreetingGui")
@@ -745,7 +745,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 						local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
 						if proximityPrompt then
 							proximityPrompt.Enabled = true
-							print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
+							--print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
 						end
 					end
 					
@@ -756,14 +756,14 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 				-- Get NEXT available quest in chain
 				local quest = NpcQuestData.GetNextAvailableQuestByMapName(data.mapName, player)
 				if not quest then
-					print("[QuestNpcHandler] ⚠️ No quest found for map:", data.mapName)
+					--print("[QuestNpcHandler] ⚠️ No quest found for map:", data.mapName)
 					isProcessing = false
 					return
 				end
 				
 				-- Check if quest is already completed
 				if isQuestCompleted(quest.questId) then
-					print("[QuestNpcHandler] ⚠️ Quest", quest.questId, "already completed!")
+					--print("[QuestNpcHandler] ⚠️ Quest", quest.questId, "already completed!")
 					local head = data.npc:FindFirstChild("Head")
 					if head then
 						local greetingGui = head:FindFirstChild("GreetingGui")
@@ -783,12 +783,12 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 				
 				-- Fire server event to accept quest
 				QuestAcceptanceEvent:FireServer(quest.questId)
-				print("[QuestNpcHandler] 📤 Sent quest acceptance to server for quest", quest.questId)
+				--print("[QuestNpcHandler] 📤 Sent quest acceptance to server for quest", quest.questId)
 				
 				-- Show quest progress GUI
 				task.delay(0.5, function()
 					showQuestProgress(quest.questId)
-					print("[QuestNpcHandler] 📊 Showing quest progress GUI for quest", quest.questId)
+					--print("[QuestNpcHandler] 📊 Showing quest progress GUI for quest", quest.questId)
 				end)
 				
 				-- Deactivate and clear all buttons immediately
@@ -796,7 +796,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 				GoodByeButton.Active = false
 				QuestButton.Text = ""
 				GoodByeButton.Text = ""
-				print("[QuestNpcHandler] Buttons deactivated and cleared")
+				--print("[QuestNpcHandler] Buttons deactivated and cleared")
 				
 				if quest and quest.responses and quest.responses[1] then
 					-- Show NPC's response to accepting the quest
@@ -813,7 +813,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 								local responseText = nextDialogue.npc .. ":\n" .. nextDialogue.text
 								
 								typeText(dialogueLabel, responseText, 0.02)
-								print("[QuestNpcHandler] Showing quest acceptance dialogue")
+								--print("[QuestNpcHandler] Showing quest acceptance dialogue")
 								
 								-- Wait for dialogue to finish and then reset everything
 								task.wait(3)
@@ -821,12 +821,12 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 								-- Destroy billboard GUI
 								if greetingGui then
 									greetingGui:Destroy()
-									print("[QuestNpcHandler] 🗑️ Billboard destroyed after quest acceptance")
+									--print("[QuestNpcHandler] 🗑️ Billboard destroyed after quest acceptance")
 								end
 								
 								-- Hide quest GUI
 								questGui.Visible = false
-								print("[QuestNpcHandler] 👁️ QuestGui hidden")
+								--print("[QuestNpcHandler] 👁️ QuestGui hidden")
 								
 								-- Reset button texts and visibility
 								QuestButton.Text = "Quest"
@@ -836,7 +836,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 								GoodByeButton.Text = "Goodbye"
 								GoodByeButton.Active = true
 								GoodByeButton.Visible = true
-								print("[QuestNpcHandler] 🔄 Buttons reset to default")
+								--print("[QuestNpcHandler] 🔄 Buttons reset to default")
 								
 								-- Re-enable proximity prompt
 								local promptPart = data.npc:FindFirstChild(data.promptPartName)
@@ -844,22 +844,22 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 									local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
 									if proximityPrompt then
 										proximityPrompt.Enabled = true
-										print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
+										--print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
 									end
 								end
 								
 								-- Restore camera to default (third-person view)
-								print("[QuestNpcHandler] 📷 Restoring camera to default view")
+								--print("[QuestNpcHandler] 📷 Restoring camera to default view")
 								CameraFocusModule.RestoreDefault()
 								task.wait(0.2)
-								print("[QuestNpcHandler] ✅ Quest accepted - camera reset, conversation ended")
+								--print("[QuestNpcHandler] ✅ Quest accepted - camera reset, conversation ended")
 							end
 						end
 					end
 				end
 			end
 		else
-			print("[QuestNpcHandler] ⚠️ No quest found for map:", data.mapName)
+			--print("[QuestNpcHandler] ⚠️ No quest found for map:", data.mapName)
 		end
 		
 		isProcessing = false -- Allow next click
@@ -869,12 +869,12 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 		if isProcessing then return end -- Prevent button spam
 		isProcessing = true
 		
-		print("[QuestNpcHandler] ✅ Clicked: GoodByeButton - Ending conversation")
+		--print("[QuestNpcHandler] ✅ Clicked: GoodByeButton - Ending conversation")
 		
 		-- Disconnect all button connections
 		if questButtonConnection then questButtonConnection:Disconnect() end
 		if goodByeButtonConnection then goodByeButtonConnection:Disconnect() end
-		print("[QuestNpcHandler] All button connections disconnected")
+		--print("[QuestNpcHandler] All button connections disconnected")
 		
 		-- Destroy billboard GUI
 		local head = data.npc:FindFirstChild("Head")
@@ -882,13 +882,13 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 			local greetingGui = head:FindFirstChild("GreetingGui")
 			if greetingGui then
 				greetingGui:Destroy()
-				print("[QuestNpcHandler] 🗑️ Billboard destroyed")
+				--print("[QuestNpcHandler] 🗑️ Billboard destroyed")
 			end
 		end
 		
 		-- Hide quest GUI
 		questGui.Visible = false
-		print("[QuestNpcHandler] 👁️ QuestGui hidden")
+		--print("[QuestNpcHandler] 👁️ QuestGui hidden")
 		
 		-- Reset all button states to default
 		QuestButton.Text = "Quest"
@@ -897,7 +897,7 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 		GoodByeButton.Text = "Goodbye"
 		GoodByeButton.Active = true
 		GoodByeButton.Visible = true
-		print("[QuestNpcHandler] 🔄 All buttons reset to default state")
+		--print("[QuestNpcHandler] 🔄 All buttons reset to default state")
 		
 		-- Re-enable proximity prompt
 		local promptPart = data.npc:FindFirstChild(data.promptPartName)
@@ -905,15 +905,15 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 			local proximityPrompt = promptPart:FindFirstChild("ProximityPrompt")
 			if proximityPrompt then
 				proximityPrompt.Enabled = true
-				print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
+				--print("[QuestNpcHandler] ✅ ProximityPrompt re-enabled")
 			end
 		end
 		
 		-- Restore camera to default (third-person view)
-		print("[QuestNpcHandler] 📷 Restoring camera to default view")
+		--print("[QuestNpcHandler] 📷 Restoring camera to default view")
 		CameraFocusModule.RestoreDefault()
 		task.wait(0.2)
-		print("[QuestNpcHandler] ✅ Conversation ended - camera reset, state fully restored")
+		--print("[QuestNpcHandler] ✅ Conversation ended - camera reset, state fully restored")
 		
 		isProcessing = false -- Allow next click (though conversation is over)
 	end)
@@ -922,11 +922,11 @@ QuestNpcInteractionEvent.OnClientEvent:Connect(function(data)
 	-- For example: show quest dialog, open quest panel, etc.
 end)
 CameraFocusModule.RestoreDefault()
-print("[QuestNpcHandler] Client script loaded - listening for quest NPC interactions")
+--print("[QuestNpcHandler] Client script loaded - listening for quest NPC interactions")
 
 -- Handle character respawn to restore camera to new character
 player.CharacterAdded:Connect(function(newCharacter)
-	print("[QuestNpcHandler] Character respawned - restoring camera")
+	--print("[QuestNpcHandler] Character respawned - restoring camera")
 	CameraFocusModule.HandleCharacterRespawn(newCharacter)
 end)
 

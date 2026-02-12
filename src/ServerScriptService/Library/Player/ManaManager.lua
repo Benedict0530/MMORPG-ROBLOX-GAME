@@ -17,7 +17,7 @@ local accumulatedManaDrain = {}
 local lastManaDecreaseTime = {}
 -- Mana settings
 local MANA_DRAIN_PER_SECOND_RUNNING = 1
-local MANA_REGEN_PER_SECOND = 0.5
+local MANA_REGEN_PERCENT_PER_SECOND = 0.05 -- 5% of max mana per second
 
 -- Get mana values for a player
 local function getManaValues(player)
@@ -90,8 +90,9 @@ local function startManaDrainLoop(player)
 				currentMana.Value = math.max(0, currentMana.Value - drainToApply)
 			end
 		elseif canRegen and humanoid.Health > 0 then
-			-- Regenerate mana if not decreased for 3 seconds
-			accumulatedManaDrain[player.UserId] = (accumulatedManaDrain[player.UserId] or 0) - (MANA_REGEN_PER_SECOND / 60)
+			-- Regenerate mana if not decreased for 3 seconds (5% of max mana per second)
+			local regenAmount = (maxMana.Value * MANA_REGEN_PERCENT_PER_SECOND) / 60
+			accumulatedManaDrain[player.UserId] = (accumulatedManaDrain[player.UserId] or 0) - regenAmount
 			if accumulatedManaDrain[player.UserId] <= -1 then
 				local regenToApply = math.floor(math.abs(accumulatedManaDrain[player.UserId]))
 				accumulatedManaDrain[player.UserId] = accumulatedManaDrain[player.UserId] + regenToApply
@@ -178,15 +179,7 @@ function ManaManager.CleanupPlayer(player)
 end
 
 -- Setup player on join
-Players.PlayerAdded:Connect(function(player)
-	task.spawn(function()
-		-- Wait for stats to be ready
-		local stats = player:WaitForChild("Stats", 10)
-		if stats then
-			ManaManager.InitializePlayer(player)
-		end
-	end)
-end)
+-- PlayerAdded handler moved to Init.server.lua for centralized initialization
 
 -- Cleanup on player disconnect
 Players.PlayerRemoving:Connect(function(player)

@@ -20,9 +20,9 @@ local function initCollisionGroups()
 		PhysicsService:RegisterCollisionGroup(NPC_COLLISION_GROUP)
 	end)
 	if success then
-		print("[NPCManager] Collision group 'Players' created successfully")
+		--print("[NPCManager] Collision group 'Players' created successfully")
 	else
-		print("[NPCManager] Collision group 'Players' already exists")
+		--print("[NPCManager] Collision group 'Players' already exists")
 	end
 end
 
@@ -56,7 +56,7 @@ local function setupNPCAnimation(npc)
 	
 	local humanoid = npc:FindFirstChild("Humanoid")
 	if not humanoid then 
-		print("[NPCManager] ❌ NPC missing Humanoid:", npc.Name)
+		--print("[NPCManager] ❌ NPC missing Humanoid:", npc.Name)
 		return 
 	end
 	
@@ -64,11 +64,11 @@ local function setupNPCAnimation(npc)
 	npc:SetAttribute("IsNPC", true)
 	
 	-- Debug: Check humanoid state
-	print("[NPCManager] Humanoid Health:", humanoid.Health, "MaxHealth:", humanoid.MaxHealth)
+	--print("[NPCManager] Humanoid Health:", humanoid.Health, "MaxHealth:", humanoid.MaxHealth)
 	
 	-- Ensure humanoid is alive (dead humanoids don't animate)
 	if humanoid.Health <= 0 then
-		print("[NPCManager] ⚠️ Humanoid is dead! Restoring health for:", npc.Name)
+		--print("[NPCManager] ⚠️ Humanoid is dead! Restoring health for:", npc.Name)
 		humanoid.MaxHealth = 100
 		humanoid.Health = 100
 	end
@@ -84,12 +84,12 @@ local function setupNPCAnimation(npc)
 	end)
 	
 	if not success or not animationTrack then
-		print("[NPCManager] ❌ Failed to load animation for:", npc.Name)
+		--print("[NPCManager] ❌ Failed to load animation for:", npc.Name)
 		return
 	end
 	
 	-- Debug: Check animation track
-	print("[NPCManager] Animation loaded. Playing animation...")
+	--print("[NPCManager] Animation loaded. Playing animation...")
 	animationTrack.Looped = true
 	
 	local playSuccess = pcall(function()
@@ -97,11 +97,11 @@ local function setupNPCAnimation(npc)
 	end)
 	
 	if not playSuccess then
-		print("[NPCManager] ❌ Failed to play animation for:", npc.Name)
+		--print("[NPCManager] ❌ Failed to play animation for:", npc.Name)
 		return
 	end
 	
-	print("[NPCManager] ✅ Animation playing. State:", animationTrack.TimePosition, "Speed:", animationTrack.Speed)
+	--print("[NPCManager] ✅ Animation playing. State:", animationTrack.TimePosition, "Speed:", animationTrack.Speed)
 	
 	-- Set collision group for ALL NPC parts (recursive - every descendant)
 	local function setCollisionForParts(model)
@@ -116,13 +116,13 @@ local function setupNPCAnimation(npc)
 	
 	setCollisionForParts(npc)
 	
-	print("[NPCManager] Setup NPC:", npc.Name, "with idle animation. Parts added to collision group.")
+	--print("[NPCManager] Setup NPC:", npc.Name, "with idle animation. Parts added to collision group.")
 	setupNPCs[npc] = {animation = animation, track = animationTrack, humanoid = humanoid}
 end
 
 -- Find all existing NPCs in workspace (recursive - checks all descendants at any depth)
 local function findAllNPCs()
-	print("[NPCManager] Scanning workspace for existing NPCs...")
+	--print("[NPCManager] Scanning workspace for existing NPCs...")
 	local count = 0
 	for _, descendant in ipairs(Workspace:GetDescendants()) do
 		if descendant:IsA("Model") and isNPC(descendant) then
@@ -130,13 +130,13 @@ local function findAllNPCs()
 			count = count + 1
 		end
 	end
-	print("[NPCManager] Found and setup", count, "NPCs")
+	--print("[NPCManager] Found and setup", count, "NPCs")
 end
 
 -- Monitor for new models being added to workspace
 Workspace.DescendantAdded:Connect(function(descendant)
 	if descendant:IsA("Model") and isNPC(descendant) then
-		print("[NPCManager] New NPC detected:", descendant.Name, "at", descendant:GetFullName())
+		--print("[NPCManager] New NPC detected:", descendant.Name, "at", descendant:GetFullName())
 		task.wait(0.1) -- Wait for model to fully load
 		setupNPCAnimation(descendant)
 	end
@@ -148,7 +148,7 @@ Workspace.DescendantRemoving:Connect(function(descendant)
 		if setupNPCs[descendant].track then
 			setupNPCs[descendant].track:Stop()
 		end
-		print("[NPCManager] NPC removed:", descendant.Name)
+		--print("[NPCManager] NPC removed:", descendant.Name)
 		setupNPCs[descendant] = nil
 	end
 end)
@@ -156,6 +156,6 @@ end)
 -- Initial setup for existing NPCs
 findAllNPCs()
 
-print("[NPCManager] NPC Manager loaded successfully")
+--print("[NPCManager] NPC Manager loaded successfully")
 
 return NPCManager

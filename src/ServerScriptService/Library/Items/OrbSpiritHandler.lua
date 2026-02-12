@@ -96,19 +96,21 @@ local orbTypeTransparency = {
 
 -- Public function to unequip orb: clears EquippedOrb slot and removes all orb visuals/effects
 function OrbSpiritHandler.UnequipOrb(player)
-	if not player then return false end
-	local stats = player:FindFirstChild("Stats")
-	if not stats then return false end
-	local equippedOrb = stats:FindFirstChild("EquippedOrb")
-	if equippedOrb then
-		local nameValue = equippedOrb:FindFirstChild("name")
-		local idValue = equippedOrb:FindFirstChild("id")
-		if nameValue then nameValue.Value = "" end
-		if idValue then idValue.Value = "" end
-	end
-	-- Remove orb visuals and effects
-	OrbSpiritHandler.UnequipSpiritOrb(player)
-	return true
+       print("[OrbSpiritHandler] UnequipOrb called for player:", player and player.Name or tostring(player))
+       if not player then return false end
+       local stats = player:FindFirstChild("Stats")
+       if not stats then return false end
+       -- Remove orb visuals and effects BEFORE clearing EquippedOrb slot (so orbName is available)
+       OrbSpiritHandler.UnequipSpiritOrb(player)
+       -- Now clear EquippedOrb slot
+       local equippedOrb = stats:FindFirstChild("EquippedOrb")
+       if equippedOrb then
+	       local nameValue = equippedOrb:FindFirstChild("name")
+	       local idValue = equippedOrb:FindFirstChild("id")
+	       if nameValue then nameValue.Value = "" end
+	       if idValue then idValue.Value = "" end
+       end
+       return true
 end
 
 -- Extract the orb type from orb name (e.g., "Dark Orb" -> "Dark")
@@ -125,7 +127,7 @@ local function clearOrbMultipliers(player)
 	if playerOrbMultipliers[userId] then
 		playerOrbMultipliers[userId] = nil
 		playerOrbEquipped[userId] = nil
-		print("[OrbSpiritHandler] Cleared orb multipliers for " .. player.Name)
+		--print("[OrbSpiritHandler] Cleared orb multipliers for " .. player.Name)
 	end
 end
 
@@ -160,7 +162,7 @@ local function storeOrbMultipliers(player, orbName)
 	-- These are NOT applied to stats - stats remain base values
 	playerOrbMultipliers[userId] = orbData.stats
 	playerOrbEquipped[userId] = true -- Mark orb as equipped
-	print("[OrbSpiritHandler] Stored multipliers for orb '" .. orbName .. "': Attack=" .. tostring(orbData.stats.Attack) .. " (only used in DamageManager for damage calc)")
+	--print("[OrbSpiritHandler] Stored multipliers for orb '" .. orbName .. "': Attack=" .. tostring(orbData.stats.Attack) .. " (only used in DamageManager for damage calc)")
 end
 
 -- Update base stats when player's stats change (after level up, stat allocation, etc)
@@ -185,7 +187,7 @@ function OrbSpiritHandler.UpdateBaseStats(player)
 	   playerBaseStats[userId].MaxHealth = stats:FindFirstChild("MaxHealth") and stats:FindFirstChild("MaxHealth").Value or 10
 	   playerBaseStats[userId].MaxMana = stats:FindFirstChild("MaxMana") and stats:FindFirstChild("MaxMana").Value or 5
 	   playerBaseStats[userId].Dexterity = stats:FindFirstChild("Dexterity") and stats:FindFirstChild("Dexterity").Value or 1
-	   print("[OrbSpiritHandler] ✓ Updated base stats for " .. player.Name .. " - Attack=" .. tostring(playerBaseStats[userId].Attack) .. ", Defence=" .. tostring(playerBaseStats[userId].Defence))
+	   --print("[OrbSpiritHandler] ✓ Updated base stats for " .. player.Name .. " - Attack=" .. tostring(playerBaseStats[userId].Attack) .. ", Defence=" .. tostring(playerBaseStats[userId].Defence))
 	   -- Reapply orb bonuses if they were active
 	   -- [REMOVED] reapplying orb stat bonuses
 end
@@ -199,32 +201,78 @@ function OrbSpiritHandler.UnequipSpiritOrb(player)
 	local stats = player:FindFirstChild("Stats")
 	if not stats then return false end
 
-	local spiritOrbStat = stats:FindFirstChild("SpiritOrb")
-	if not spiritOrbStat then return false end
+	-- Get orb name from EquippedOrb folder (new inventory system)
+	local orbName = ""
+	local equippedOrbFolder = stats:FindFirstChild("EquippedOrb")
+	if equippedOrbFolder then
+		local nameValue = equippedOrbFolder:FindFirstChild("name")
+		if nameValue then
+			orbName = nameValue.Value
+		end
+	end
+	
+	-- Fallback to old SpiritOrb stat if EquippedOrb is not set
+	if orbName == "" then
+		local spiritOrbStat = stats:FindFirstChild("SpiritOrb")
+		if spiritOrbStat then
+			orbName = spiritOrbStat.Value
+		end
+	end
 
-	local orbName = spiritOrbStat.Value
-	if orbName == "" or orbName == nil then return false end
-
-
-	-- Remove all orb and VFX objects from any descendant of the character
-	local orbType = getOrbType(orbName)
+	-- Remove all orb-related Accessories, Folders, and Models from the character and all parts
 	local character = player.Character
 	if character then
-		for _, descendant in ipairs(character:GetDescendants()) do
-			-- Remove spirit orb by name
-			if descendant.Name == orbName and descendant:IsA("BasePart") then
-				descendant:Destroy()
-				print("[OrbSpiritHandler] Unequipped spirit orb '" .. orbName .. "' for player " .. player.Name)
+		local function getFullPath(obj)
+			local path = obj.Name
+			local parent = obj.Parent
+			while parent and parent ~= workspace and parent ~= nil do
+				path = parent.Name .. "." .. path
+				parent = parent.Parent
 			end
-			-- Remove VFX by orb type name
-			if descendant.Name == orbType and (descendant:IsA("BasePart") or descendant:IsA("ParticleEmitter") or descendant:IsA("Attachment") or descendant:IsA("Model")) then
-				descendant:Destroy()
-				print("[OrbSpiritHandler] Unequipped VFX '" .. orbType .. "' for player " .. player.Name)
+			return path
+		end
+		print("[OrbSpiritHandler] --- ORB VFX PART DEBUG (ON UNEQUIP) ---")
+		-- Remove all Accessories with 'Orb' in the name
+		for _, child in ipairs(character:GetChildren()) do
+			if child:IsA("Accessory") and child.Name:lower():find("orb") then
+				print("[OrbSpiritHandler] Removing Accessory '", child.Name, "' from character:", getFullPath(child))
+				child:Destroy()
 			end
-			-- Remove Accessories with orbType or orbName in their name
-			if descendant:IsA("Accessory") and (descendant.Name == orbType or descendant.Name == orbName or string.find(descendant.Name, orbType) or string.find(descendant.Name, orbName)) then
-				descendant:Destroy()
-				print("[OrbSpiritHandler] Unequipped Accessory '" .. descendant.Name .. "' for player " .. player.Name)
+		end
+		-- Recursively remove all Folders, Models, Attachments, and ParticleEmitters matching the orb type from all parts
+		local function recursiveVFXCleanup(obj, orbType)
+			for _, child in ipairs(obj:GetChildren()) do
+				local nameTrimmed = child.Name:lower():gsub("^%s+", ""):gsub("%s+$", "")
+				local orbTypeTrimmed = (orbType or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+				if child:IsA("Folder") or child:IsA("Model") or child:IsA("Attachment") then
+					if nameTrimmed == orbTypeTrimmed then
+						print("[OrbSpiritHandler] Recursively removing VFX '", child.Name, "' from:", getFullPath(child))
+						child:Destroy()
+					else
+						recursiveVFXCleanup(child, orbType)
+					end
+				elseif child:IsA("ParticleEmitter") then
+					print("[OrbSpiritHandler] Removing ParticleEmitter '", child.Name, "' from:", getFullPath(child))
+					child:Destroy()
+				else
+					recursiveVFXCleanup(child, orbType)
+				end
+			end
+		end
+		for _, part in ipairs(character:GetDescendants()) do
+			if part:IsA("BasePart") or part:IsA("MeshPart") then
+				recursiveVFXCleanup(part, orbType)
+			end
+		end
+		print("[OrbSpiritHandler] --- END ORB VFX PART DEBUG (ON UNEQUIP) ---")
+		-- Remove old slash particles
+		local upperTorso = character:FindFirstChild("UpperTorso")
+		if upperTorso then
+			for _, slashName in ipairs({"Slash1", "Slash2"}) do
+				local slash = upperTorso:FindFirstChild(slashName)
+				if slash then
+					slash:Destroy()
+				end
 			end
 		end
 	end
@@ -243,7 +291,7 @@ function OrbSpiritHandler.UnequipSpiritOrb(player)
 				hasOrbBuff.Parent = stats
 			end
 			hasOrbBuff.Value = false
-			print("[OrbSpiritHandler] Set HasOrbBuff to false for " .. player.Name)
+			--print("[OrbSpiritHandler] Set HasOrbBuff to false for " .. player.Name)
 		end
 	end
 
@@ -350,19 +398,19 @@ function OrbSpiritHandler.EquipSlashParticles(player, orbHandle)
 	
 	local equippedOrbFolder = stats:FindFirstChild("EquippedOrb")
 	if not equippedOrbFolder then
-		print("[OrbSpiritHandler] No EquippedOrb folder found, skipping slash particles")
+		--print("[OrbSpiritHandler] No EquippedOrb folder found, skipping slash particles")
 		return false
 	end
 	
 	local orbNameValue = equippedOrbFolder:FindFirstChild("name")
 	local orbName = orbNameValue and orbNameValue.Value or ""
 	if not orbName or orbName == "" then 
-		print("[OrbSpiritHandler] No orb equipped, skipping slash particles")
+		--print("[OrbSpiritHandler] No orb equipped, skipping slash particles")
 		return false
 	end
 	
 	local orbType = getOrbType(orbName)
-	print("[OrbSpiritHandler] Equipping slash particles for orb type '" .. orbType .. "'")
+	--print("[OrbSpiritHandler] Equipping slash particles for orb type '" .. orbType .. "'")
 	
 	-- Get color from orb type table (default to white if not found)
 	local particleColor = orbTypeColors[orbType] or Color3.fromRGB(255, 255, 255)
@@ -379,7 +427,7 @@ function OrbSpiritHandler.EquipSlashParticles(player, orbHandle)
 		
 		-- If template doesn't exist, create a simple particle emitter
 		if not slashTemplate then
-			print("[OrbSpiritHandler] Creating default slash particles for " .. slashName)
+			--print("[OrbSpiritHandler] Creating default slash particles for " .. slashName)
 			slashTemplate = Instance.new("Part")
 			slashTemplate.Name = slashName
 			slashTemplate.CanCollide = false
@@ -412,7 +460,7 @@ function OrbSpiritHandler.EquipSlashParticles(player, orbHandle)
 		-- Disable particles initially
 		OrbSpiritHandler.SetParticlesEnabled(newSlash, false)
 
-		print("[OrbSpiritHandler] Successfully equipped " .. slashName .. " to UpperTorso for player " .. player.Name .. " with color type " .. orbType)
+		--print("[OrbSpiritHandler] Successfully equipped " .. slashName .. " to UpperTorso for player " .. player.Name .. " with color type " .. orbType)
 	end
 
 	return true
@@ -501,7 +549,7 @@ function OrbSpiritHandler.UnequipSlashParticles(player)
 		local slash = upperTorso:FindFirstChild(slashName)
 		if slash then
 			slash:Destroy()
-			print("[OrbSpiritHandler] Removed " .. slashName .. " from UpperTorso for player " .. player.Name)
+			--print("[OrbSpiritHandler] Removed " .. slashName .. " from UpperTorso for player " .. player.Name)
 		end
 	end
 
@@ -574,7 +622,7 @@ end
 function OrbSpiritHandler.ForceCleanupAllPlayerData()
 	activeParticleEffects = {}
 	lastKnownCharacters = {}
-	print("[OrbSpiritHandler] Forcefully cleaned up all cached player orb data (base stat cache removed)")
+	--print("[OrbSpiritHandler] Forcefully cleaned up all cached player orb data (base stat cache removed)")
 end
 
 -- Cleanup player orb data when they disconnect
@@ -598,7 +646,7 @@ local function cleanupPlayerOrbData(player)
 	
 	-- [REMOVED] playerOrbBonusedStats cleanup
 	
-	print("[OrbSpiritHandler] Cleaned up orb data for " .. player.Name .. " (userId: " .. userId .. ")")
+	--print("[OrbSpiritHandler] Cleaned up orb data for " .. player.Name .. " (userId: " .. userId .. ")")
 	
 	-- Remove from particle effects tracking
 	if activeParticleEffects[userId] then
@@ -655,181 +703,219 @@ end
 
 -- Equip orb from inventory system (uses EquippedOrb folder instead of SpiritOrb stat)
 function OrbSpiritHandler.EquipOrbFromInventory(player)
-	if not player then
-		warn("[OrbSpiritHandler] Player is nil")
-		return false
-	end
-	local userId = player.UserId
-	if isEquippingOrb[userId] then
-		warn("[OrbSpiritHandler] Already equipping orb for userId " .. tostring(userId) .. ", skipping.")
-		return false
-	end
-	isEquippingOrb[userId] = true
-	local cleanup = function()
-		isEquippingOrb[userId] = nil
-	end
-	local ok, result = pcall(function()
-		-- No stat modification needed for orb equip anymore
-		-- 3. Unequip any existing orb and clear all orb effects
-		OrbSpiritHandler.UnequipSpiritOrb(player)
-		local equippedOrbData = OrbSpiritHandler.GetEquippedOrbFromInventory(player)
-		-- Set HasOrbBuff flag in Stats folder to true only if orb equipped, else false
-		do
-			local stats = player:FindFirstChild("Stats")
-			if stats then
-				local hasOrbBuff = stats:FindFirstChild("HasOrbBuff")
-				if not hasOrbBuff then
-					hasOrbBuff = Instance.new("BoolValue")
-					hasOrbBuff.Name = "HasOrbBuff"
-					hasOrbBuff.Parent = stats
-				end
-				if equippedOrbData and equippedOrbData.name and equippedOrbData.name ~= "" then
-					hasOrbBuff.Value = true
-					print("[OrbSpiritHandler] Set HasOrbBuff to true for " .. player.Name)
-				else
-					hasOrbBuff.Value = false
-					print("[OrbSpiritHandler] Set HasOrbBuff to false for " .. player.Name)
-				end
-			end
-		end
-		
-		if not equippedOrbData or not equippedOrbData.name or equippedOrbData.name == "" then
-			print("[OrbSpiritHandler] Player " .. player.Name .. " has no equipped orb in inventory system")
-			return false
-		end
-	
-		local character = player.Character
-		if not character then
-			warn("[OrbSpiritHandler] Player " .. player.Name .. " has no character")
-			return false
-		end
-	
-		local stats = player:FindFirstChild("Stats")
-		if not stats then
-			warn("[OrbSpiritHandler] Player " .. player.Name .. " has no Stats folder")
-			return false
-		end
-	
-		-- Remove old orb
-		local newOrbName = equippedOrbData.name
-		local newOrbType = getOrbType(newOrbName)
-		
-		-- Remove old orb accessory
-		for _, child in ipairs(character:GetChildren()) do
-			if child:IsA("Accessory") and child.Name:match("[Oo]rb") then
-				child:Destroy()
-				break
-			end
-		end
-		
-		-- Remove all HandVFX and particles from LeftHand before equipping new one
-		local leftHand = character:FindFirstChild("LeftHand")
-		if leftHand then
-			for _, child in ipairs(leftHand:GetChildren()) do
-				if child:IsA("Model") or child:IsA("Folder") or child:IsA("BasePart") or child:IsA("ParticleEmitter") then
-					child:Destroy()
-				end
-			end
-		end
-		
-		-- Remove old slash particles
-		local upperTorso = character:FindFirstChild("UpperTorso")
-		if upperTorso then
-			for _, slashName in ipairs({"Slash1", "Slash2"}) do
-				local slash = upperTorso:FindFirstChild(slashName)
-				if slash then
-					slash:Destroy()
-				end
-			end
-		end
-		
-		task.wait(0.1) -- Wait for cleanup
-		
+    if not player then
+        warn("[OrbSpiritHandler] Player is nil")
+        return false
+    end
+    local userId = player.UserId
+    if isEquippingOrb[userId] then
+        warn("[OrbSpiritHandler] Already equipping orb for userId " .. tostring(userId) .. ", skipping.")
+        return false
+    end
+    isEquippingOrb[userId] = true
+    local cleanup = function()
+        isEquippingOrb[userId] = nil
+    end
+    local ok, result = pcall(function()
+        --print("[OrbSpiritHandler] EquipOrbFromInventory called for player " .. player.Name)
+        OrbSpiritHandler.UnequipSpiritOrb(player)
+        
+        -- Get the current equipped orb from Stats.EquippedOrb folder
+        -- This was already set by InventoryManager.setEquippedOrb before this function was called
+        local equippedOrbData = OrbSpiritHandler.GetEquippedOrbFromInventory(player)
+        --print("[OrbSpiritHandler] Reading equipped orb from Stats:", equippedOrbData and equippedOrbData.name or "nil", equippedOrbData and equippedOrbData.id or "nil")
+        
+        -- Update HasOrbBuff flag
+        do
+            local stats = player:FindFirstChild("Stats")
+            if stats then
+                local hasOrbBuff = stats:FindFirstChild("HasOrbBuff")
+                if not hasOrbBuff then
+                    hasOrbBuff = Instance.new("BoolValue")
+                    hasOrbBuff.Name = "HasOrbBuff"
+                    hasOrbBuff.Parent = stats
+                end
+                if equippedOrbData and equippedOrbData.name and equippedOrbData.name ~= "" then
+                    hasOrbBuff.Value = true
+                    --print("[OrbSpiritHandler] Set HasOrbBuff to true for " .. player.Name)
+                else
+                    hasOrbBuff.Value = false
+                    --print("[OrbSpiritHandler] Set HasOrbBuff to false for " .. player.Name)
+                end
+            else
+                warn("[OrbSpiritHandler] Stats folder missing for player " .. player.Name)
+            end
+        end
+    
+        if not equippedOrbData or not equippedOrbData.name or equippedOrbData.name == "" then
+            warn("[OrbSpiritHandler] Player " .. player.Name .. " has no equipped orb in inventory system")
+            return false
+        end
+        local character = player.Character
+        if not character then
+            warn("[OrbSpiritHandler] Player " .. player.Name .. " has no character")
+            return false
+        end
+        local stats = player:FindFirstChild("Stats")
+        if not stats then
+            warn("[OrbSpiritHandler] Player " .. player.Name .. " has no Stats folder")
+            return false
+        end
+        -- Remove old orb accessory, VFX, etc.
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("Accessory") and child.Name:match("[Oo]rb") then
+                --print("[OrbSpiritHandler] Removing old orb accessory: " .. child.Name)
+                child:Destroy()
+                break
+            end
+        end
+        -- Remove all HandVFX and particles from all parts before equipping new one
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                for _, child in ipairs(part:GetChildren()) do
+                    if child.Name:find("VFX") or child:IsA("ParticleEmitter") then
+                        child:Destroy()
+                    end
+                end
+            end
+        end
+        -- Remove old slash particles
+        local upperTorso = character:FindFirstChild("UpperTorso")
+        if upperTorso then
+            for _, slashName in ipairs({"Slash1", "Slash2"}) do
+                local slash = upperTorso:FindFirstChild(slashName)
+                if slash then
+                    --print("[OrbSpiritHandler] Removing old slash particle: " .. slashName)
+                    slash:Destroy()
+                end
+            end
+        end
+        task.wait(0.1) -- Wait for cleanup
 		local orbName = equippedOrbData.name
 		local orbId = equippedOrbData.id
-		
-		-- Find the orb in ServerStorage
-		local orbsFolder = ServerStorage:FindFirstChild("Orbs")
-		local orbTemplate = nil
-		
-		if orbsFolder then
-			orbTemplate = orbsFolder:FindFirstChild(orbName)
-		end
-		
-		-- Also check OrbItems folder
-		if not orbTemplate then
-			local orbItemsFolder = ServerStorage:FindFirstChild("OrbItems")
-			if orbItemsFolder then
-				orbTemplate = orbItemsFolder:FindFirstChild(orbName)
-			end
-		end
-		
-		if not orbTemplate then
-			warn("[OrbSpiritHandler] Orb '" .. orbName .. "' not found in ServerStorage")
-			return false
-		end
-		
-		-- Clone and equip orb
-		local newOrb = orbTemplate:Clone()
-		newOrb.Parent = character
-		print("[OrbSpiritHandler] Equipped orb '" .. orbName .. "' for player " .. player.Name)
-		task.wait(0.1)
-		
-		-- Set position offset
-		local handle = newOrb:FindFirstChild("Handle")
-		if handle then
-			local accessoryWeld = handle:FindFirstChild("AccessoryWeld")
-			if accessoryWeld then
-				if accessoryWeld:IsA("Attachment") then
-					local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-					if humanoidRootPart then
-						local weld = Instance.new("WeldConstraint")
-						weld.Part0 = humanoidRootPart
-						weld.Part1 = handle
-						weld.Parent = handle
-					end
-				else
-					accessoryWeld.C0 = CFrame.new(0, 0, -1.5)
-				end
-			end
-		end
-		
-		-- Equip HandVFX
+		local newOrbType = getOrbType(orbName)
+        -- Find the orb in ServerStorage
+        local orbsFolder = ServerStorage:FindFirstChild("Orbs")
+        local orbTemplate = nil
+        if orbsFolder then
+            --print("[OrbSpiritHandler] OrbsFolder found. Children:")
+            for _, v in ipairs(orbsFolder:GetChildren()) do
+                --print("  ", v.Name)
+            end
+            orbTemplate = orbsFolder:FindFirstChild(orbName)
+        else
+            warn("[OrbSpiritHandler] OrbsFolder not found in ServerStorage!")
+        end
+        -- Also check OrbItems folder
+        if not orbTemplate then
+            local orbItemsFolder = ServerStorage:FindFirstChild("OrbItems")
+            if orbItemsFolder then
+                --print("[OrbSpiritHandler] OrbItemsFolder found. Children:")
+                for _, v in ipairs(orbItemsFolder:GetChildren()) do
+                    --print("  ", v.Name)
+                end
+                orbTemplate = orbItemsFolder:FindFirstChild(orbName)
+            else
+                warn("[OrbSpiritHandler] OrbItemsFolder not found in ServerStorage!")
+            end
+        end
+        if not orbTemplate then
+            warn("[OrbSpiritHandler] Orb '" .. orbName .. "' not found in ServerStorage. Searched Orbs and OrbItems folders.")
+            return false
+        end
+        --print("[OrbSpiritHandler] Found orb template: " .. orbTemplate.Name)
+        -- Clone and equip orb
+        local newOrb = orbTemplate:Clone()
+        newOrb.Parent = character
+        --print("[OrbSpiritHandler] Equipped orb '" .. orbName .. "' for player " .. player.Name)
+        task.wait(0.1)
+        -- Set position offset
+        local handle = newOrb:FindFirstChild("Handle")
+        if handle then
+            local accessoryWeld = handle:FindFirstChild("AccessoryWeld")
+            if accessoryWeld then
+                if accessoryWeld:IsA("Attachment") then
+                    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+                    if humanoidRootPart then
+                        local weld = Instance.new("WeldConstraint")
+                        weld.Part0 = humanoidRootPart
+                        weld.Part1 = handle
+                        weld.Parent = handle
+                        --print("[OrbSpiritHandler] WeldConstraint created between HumanoidRootPart and Handle")
+                    end
+                else
+                    accessoryWeld.C0 = CFrame.new(0, 0, -1.5)
+                    --print("[OrbSpiritHandler] AccessoryWeld C0 set for Handle")
+                end
+            end
+        end
+		-- Equip HandVFX to all parts with Motor6D connections
 		local handVfxFolder = ServerStorage:FindFirstChild("HandVFX")
 		if handVfxFolder then
 			local handVfxTemplate = handVfxFolder:FindFirstChild(newOrbType)
 			if handVfxTemplate then
-				local newVfx = handVfxTemplate:Clone()
-				if leftHand then
-					newVfx.Parent = leftHand
-				else
-					newVfx.Parent = character
+				-- Find all parts with Motor6D connections
+				local partsWithMotor6D = {}
+				for _, part in ipairs(character:GetDescendants()) do
+					if part:IsA("BasePart") then
+						for _, child in ipairs(part:GetChildren()) do
+							if child:IsA("Motor6D") then
+								table.insert(partsWithMotor6D, part)
+								break
+							end
+						end
+					end
 				end
-				print("[OrbSpiritHandler] Equipped HandVFX '" .. newOrbType .. "' for player " .. player.Name)
+				-- Debug: Log all parts that will get a VFX folder
+				local function getFullPath(obj)
+					local path = obj.Name
+					local parent = obj.Parent
+					while parent and parent ~= workspace and parent ~= nil do
+						path = parent.Name .. "." .. path
+						parent = parent.Parent
+					end
+					return path
+				end
+				print("[OrbSpiritHandler] --- ORB VFX PART DEBUG (ON EQUIP) ---")
+				for _, part in ipairs(partsWithMotor6D) do
+					print("[OrbSpiritHandler] Will attach VFX to part:", getFullPath(part))
+				end
+				print("[OrbSpiritHandler] --- END ORB VFX PART DEBUG (ON EQUIP) ---")
+				-- Clone VFX to each part with Motor6D
+				for _, part in ipairs(partsWithMotor6D) do
+					local newVfx = handVfxTemplate:Clone()
+					newVfx.Parent = part
+				end
+			else
+				warn("[OrbSpiritHandler] HandVFX template '" .. newOrbType .. "' not found in HandVFXFolder!")
 			end
+		else
+			warn("[OrbSpiritHandler] HandVFXFolder not found in ServerStorage!")
 		end
-		
 		-- Equip slash particles
-		OrbSpiritHandler.EquipSlashParticles(player, handle)
-		
-		-- Store multipliers (for DamageManager to use ONLY - never applied to stats)
-		storeOrbMultipliers(player, orbName)
-		
-		-- Notify client UI to refresh stats display (orb bonus changed)
-		local refreshStatsUIEvent = ReplicatedStorage:FindFirstChild("RefreshStatsUI")
-		if refreshStatsUIEvent then
-			refreshStatsUIEvent:FireClient(player)
+		if handle then
+			OrbSpiritHandler.EquipSlashParticles(player, handle)
+		else
+			warn("[OrbSpiritHandler] No Handle found on orb for EquipSlashParticles!")
 		end
-	end)
-	cleanup()
-	if not ok then
-		warn("[OrbSpiritHandler] Exception in EquipOrbFromInventory for userId " .. tostring(userId) .. ": " .. tostring(result))
-		return false
-	end
-	return result
-	-- Clear equipping flag (handled by cleanup)
-	-- isEquippingOrb[userId] = nil
-	-- return true (handled by result)
+        -- Store multipliers (for DamageManager to use ONLY - never applied to stats)
+        storeOrbMultipliers(player, orbName)
+        
+        -- Notify client UI to refresh stats display (orb bonus changed)
+        local refreshStatsUIEvent = ReplicatedStorage:FindFirstChild("RefreshStatsUI")
+        if refreshStatsUIEvent then
+            refreshStatsUIEvent:FireClient(player)
+            --print("[OrbSpiritHandler] RefreshStatsUI event fired for player " .. player.Name)
+        end
+        
+        --print("[OrbSpiritHandler] ✓ Successfully equipped orb VFX/particles for " .. player.Name .. ": " .. orbName)
+    end)
+    cleanup()
+    if not ok then
+        warn("[OrbSpiritHandler] Exception in EquipOrbFromInventory for userId " .. tostring(userId) .. ": " .. tostring(result))
+        return false
+    end
+    return result == nil and true or result
 end
 
 -- Listen for EquippedOrbChanged event from inventory system to equip orb
@@ -842,11 +928,11 @@ if not EquippedOrbChangedEvent then
 end
 
 EquippedOrbChangedEvent.OnServerEvent:Connect(function(player)
-	print("[OrbSpiritHandler] EquippedOrbChanged event fired for " .. player.Name)
+	--print("[OrbSpiritHandler] EquippedOrbChanged event fired for " .. player.Name)
 	task.wait(0.15) -- Wait for stats to be saved and data to sync
 	local success = OrbSpiritHandler.EquipOrbFromInventory(player)
 	if success then
-		print("[OrbSpiritHandler] Successfully applied orb VFX for " .. player.Name)
+		--print("[OrbSpiritHandler] Successfully applied orb VFX for " .. player.Name)
 	else
 		warn("[OrbSpiritHandler] Failed to apply orb VFX for " .. player.Name)
 	end
@@ -863,10 +949,10 @@ function OrbSpiritHandler.SetAdminStatChangeFlag(player, enabled)
 	local userId = player.UserId
 	if enabled then
 		isChangingStatsFromAdmin[userId] = true
-		print("[OrbSpiritHandler] Suspended stat listeners for admin change: " .. player.Name)
+		--print("[OrbSpiritHandler] Suspended stat listeners for admin change: " .. player.Name)
 	else
 		isChangingStatsFromAdmin[userId] = nil
-		print("[OrbSpiritHandler] Resumed stat listeners after admin change: " .. player.Name)
+		--print("[OrbSpiritHandler] Resumed stat listeners after admin change: " .. player.Name)
 	end
 end
 

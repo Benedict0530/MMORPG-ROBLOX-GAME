@@ -252,6 +252,16 @@ local function createInventoryItem(itemData, index)
 				local equippedId = equipped:FindFirstChild("id")
 				if equippedId and equippedId.Value == itemData.id then
 					equippedVisible = true
+					end
+			end
+			-- Also check SecondaryEquipped for weapons
+			if not equippedVisible then
+				local secondaryEquipped = stats:FindFirstChild("SecondaryEquipped")
+				if secondaryEquipped and secondaryEquipped:IsA("Folder") then
+					local secondaryEquippedId = secondaryEquipped:FindFirstChild("id")
+					if secondaryEquippedId and secondaryEquippedId.Value == itemData.id then
+						equippedVisible = true
+					end
 				end
 			end
 		elseif itemData.itemType == "spirit orb" then
@@ -304,68 +314,69 @@ local function createInventoryItem(itemData, index)
 		-- Check if this is a spirit orb, weapon, or armor
 		local stats = nil
 		local descText = ""
-		if itemData.itemType == "spirit orb" then
-			stats = OrbData.GetOrbData(itemData.name)
-			if not stats then
-				warn("[InventoryUI] Could not find orb data for " .. itemData.name)
-				return
-			end
-			descText = itemData.name .. "\n"
-			if stats.description then
-				descText = descText .. "\n" .. stats.description .. "\n"
-			end
-			descText = descText .. "\n🟡 Orb Multipliers:\n"
-			if stats.stats then
-				if stats.stats.Attack and stats.stats.Attack > 1 then
-					descText = descText .. string.format("Attack x%.2f\n", stats.stats.Attack)
-				end
-				if stats.stats.Defence and stats.stats.Defence > 1 then
-					descText = descText .. string.format("Defence x%.2f\n", stats.stats.Defence)
-				end
-				if stats.stats.CriticalChance and stats.stats.CriticalChance > 1 then
-					descText = descText .. string.format("Critical Chance x%.2f\n", stats.stats.CriticalChance)
-				end
-				if stats.stats.CriticalDamage and stats.stats.CriticalDamage > 1 then
-					descText = descText .. string.format("Critical Damage x%.2f\n", stats.stats.CriticalDamage)
-				end
-			end
-			if stats.chance then
-				descText = descText .. "\nDrop Rate: " .. tostring(math.floor(stats.chance * 100)) .. "%"
-			end
-		elseif itemData.itemType == "armor" then
-			stats = ArmorData[itemData.name]
-			if not stats then
-				warn("[InventoryUI] Could not find armor stats for " .. itemData.name)
-				return
-			end
-			descText = itemData.name .. "\n"
-			if stats.Description then
-				descText = descText .. "\n" .. stats.Description .. "\n"
-			end
-			descText = descText .. "\n🛡️ Armor Stats:\n"
-			descText = descText .. "Type: " .. tostring(stats.Type or "N/A") .. "\n"
-			descText = descText .. "Defense: " .. tostring(stats.Defense or "N/A") .. "\n"
-		else
-			if itemData.itemType == "weapon" or itemData.itemType == nil then
-				stats = WeaponData.GetWeaponStats(itemData.name)
-				if not stats then
-					warn("[InventoryUI] Could not find weapon stats for " .. itemData.name)
-					return
-				end
-				descText = itemData.name .. "\n"
-				if stats.Description then
-					descText = descText .. "\n" .. stats.Description .. "\n"
-				end
-				descText = descText .. "\n⚔️ Weapon Stats:\n"
-				descText = descText .. "Damage: " .. tostring(stats.damage) .. "\n"
-				descText = descText .. "Level Requirement: " .. tostring(stats.levelRequirement or "N/A") .. "\n"
-				local price = stats.Price or 0
-				local sellingPrice = math.floor(price * 0.4)
-				descText = descText .. "Selling Price: $" .. formatNumberWithCommas(sellingPrice)
-			else
-				descText = itemData.name .. "\nNo stats available."
-			end
-		end
+			   if itemData.itemType == "spirit orb" then
+				   stats = OrbData.GetOrbData(itemData.name)
+				   if not stats then
+					   warn("[InventoryUI] Could not find orb data for " .. itemData.name)
+					   return
+				   end
+				   descText = itemData.name .. "\n"
+				   if stats.description then
+					   descText = descText .. "\n" .. stats.description .. "\n"
+				   end
+				   descText = descText .. "\n🟡 Orb Multipliers:\n"
+				   if stats.stats then
+					   if stats.stats.Attack and stats.stats.Attack > 1 then
+						   descText = descText .. string.format("Attack x%.2f\n", stats.stats.Attack)
+					   end
+					   if stats.stats.Defence and stats.stats.Defence > 1 then
+						   descText = descText .. string.format("Defence x%.2f\n", stats.stats.Defence)
+					   end
+					   if stats.stats.CriticalChance and stats.stats.CriticalChance > 1 then
+						   descText = descText .. string.format("Critical Chance x%.2f\n", stats.stats.CriticalChance)
+					   end
+					   if stats.stats.CriticalDamage and stats.stats.CriticalDamage > 1 then
+						   descText = descText .. string.format("Critical Damage x%.2f\n", stats.stats.CriticalDamage)
+					   end
+				   end
+				   if stats.chance then
+					   descText = descText .. "\nDrop Rate: " .. tostring(math.floor(stats.chance * 100)) .. "%"
+				   end
+			   elseif itemData.itemType == "armor" or (itemData.name and string.find(itemData.name:lower(), "shoes")) then
+				   -- Treat anything with itemType 'armor' or name containing 'shoes' as armor
+				   stats = ArmorData[itemData.name]
+				   if not stats then
+					   warn("[InventoryUI] Could not find armor stats for " .. itemData.name)
+					   return
+				   end
+				   descText = itemData.name .. "\n"
+				   if stats.Description then
+					   descText = descText .. "\n" .. stats.Description .. "\n"
+				   end
+				   descText = descText .. "\n🛡️ Armor Stats:\n"
+				   descText = descText .. "Type: " .. tostring(stats.Type or "N/A") .. "\n"
+				   descText = descText .. "Defense: " .. tostring(stats.Defense or "N/A") .. "\n"
+			   else
+				   if itemData.itemType == "weapon" or itemData.itemType == nil then
+					   stats = WeaponData.GetWeaponStats(itemData.name)
+					   if not stats then
+						   warn("[InventoryUI] Could not find weapon stats for " .. itemData.name)
+						   return
+					   end
+					   descText = itemData.name .. "\n"
+					   if stats.Description then
+						   descText = descText .. "\n" .. stats.Description .. "\n"
+					   end
+					   descText = descText .. "\n⚔️ Weapon Stats:\n"
+					   descText = descText .. "Damage: " .. tostring(stats.damage) .. "\n"
+					   descText = descText .. "Level Requirement: " .. tostring(stats.levelRequirement or "N/A") .. "\n"
+					   local price = stats.Price or 0
+					   local sellingPrice = math.floor(price * 0.4)
+					   descText = descText .. "Selling Price: $" .. formatNumberWithCommas(sellingPrice)
+				   else
+					   descText = itemData.name .. "\nNo stats available."
+				   end
+			   end
 
 		local statsDescription = itemStats:FindFirstChild("Description")
 		if statsDescription then
@@ -384,6 +395,16 @@ local function createInventoryItem(itemData, index)
 				local equippedId = equipped:FindFirstChild("id")
 				if equippedId and equippedId.Value == itemData.id then
 					isEquipped = true
+				end
+			end
+			-- Check SecondaryEquipped for weapons
+			if not isEquipped and (itemData.itemType == "weapon" or itemData.itemType == nil) then
+				local secondaryEquipped = statsFolder:FindFirstChild("SecondaryEquipped")
+				if secondaryEquipped and secondaryEquipped:IsA("Folder") then
+					local secondaryEquippedId = secondaryEquipped:FindFirstChild("id")
+					if secondaryEquippedId and secondaryEquippedId.Value == itemData.id then
+						isEquipped = true
+					end
 				end
 			end
 			if not isEquipped and itemData.itemType == "spirit orb" then
@@ -415,12 +436,34 @@ local function createInventoryItem(itemData, index)
 			local buttonTextLabel = firstButton:FindFirstChild("Text")
 			if isEquipped then
 				if buttonTextLabel and (buttonTextLabel:IsA("TextLabel") or buttonTextLabel:IsA("TextButton")) then
-					buttonTextLabel.Text = "Unequip"
+					-- Check if equipped as secondary weapon
+					local isSecondary = false
+					if (itemData.itemType == "weapon" or itemData.itemType == nil) and statsFolder then
+						local secondaryEquipped = statsFolder:FindFirstChild("SecondaryEquipped")
+						if secondaryEquipped and secondaryEquipped:IsA("Folder") then
+							local secondaryEquippedId = secondaryEquipped:FindFirstChild("id")
+							if secondaryEquippedId and secondaryEquippedId.Value == itemData.id then
+								isSecondary = true
+							end
+						end
+					end
+					buttonTextLabel.Text = isSecondary and "Unequip 2nd" or "Unequip"
 				end
 				if secondButton then secondButton.Visible = false end
 			else
 				if buttonTextLabel and (buttonTextLabel:IsA("TextLabel") or buttonTextLabel:IsA("TextButton")) then
-					buttonTextLabel.Text = "Equip"
+					-- Check if primary weapon is equipped for weapons
+					local hasPrimaryWeapon = false
+					if (itemData.itemType == "weapon" or itemData.itemType == nil) and statsFolder then
+						local equipped = statsFolder:FindFirstChild("Equipped")
+						if equipped and equipped:IsA("Folder") then
+							local equippedId = equipped:FindFirstChild("id")
+							if equippedId and equippedId.Value ~= "" then
+								hasPrimaryWeapon = true
+							end
+						end
+					end
+					buttonTextLabel.Text = hasPrimaryWeapon and "Equip 2nd" or "Equip"
 				end
 				if secondButton then secondButton.Visible = true end
 			end
@@ -445,7 +488,7 @@ local function createInventoryItem(itemData, index)
 			itemStats.Visible = false
 			itemActionEvent:FireServer(action, itemData.id)
 			task.delay(0.3, function()
-				print("[InventoryUI] Auto-refresh after action: " .. action)
+				--print("[InventoryUI] Auto-refresh after action: " .. action)
 				refreshInventory()
 			end)
 		end
@@ -482,6 +525,16 @@ local function createInventoryItem(itemData, index)
 								isEquipped = true
 							end
 						end
+						-- Check SecondaryEquipped for weapons
+						if not isEquipped then
+							local secondaryEquipped = statsFolder:FindFirstChild("SecondaryEquipped")
+							if secondaryEquipped and secondaryEquipped:IsA("Folder") then
+								local secondaryEquippedId = secondaryEquipped:FindFirstChild("id")
+								if secondaryEquippedId and secondaryEquippedId.Value == itemData.id then
+									isEquipped = true
+								end
+							end
+						end
 					elseif itemData.itemType == "spirit orb" then
 						local equippedOrb = statsFolder:FindFirstChild("EquippedOrb")
 						if equippedOrb and equippedOrb:IsA("Folder") then
@@ -493,10 +546,10 @@ local function createInventoryItem(itemData, index)
 					end
 				end
 				if isEquipped then
-					print("[InventoryUI] Unequip button pressed for", itemData.name, "id:", itemData.id)
+					--print("[InventoryUI] Unequip button pressed for", itemData.name, "id:", itemData.id)
 					fireAction("Unequip")
 				else
-					print("[InventoryUI] Equip button pressed for", itemData.name, "id:", itemData.id)
+					--print("[InventoryUI] Equip button pressed for", itemData.name, "id:", itemData.id)
 					fireAction("Equip")
 				end
 			end)
@@ -512,7 +565,7 @@ local function createInventoryItem(itemData, index)
 			end
 			-- Connect new handler
 			local newDropConn = secondButton.MouseButton1Click:Connect(function()
-				print("[InventoryUI] Drop button pressed for", itemData.name, "id:", itemData.id)
+				--print("[InventoryUI] Drop button pressed for", itemData.name, "id:", itemData.id)
 				fireAction("Drop")
 			end)
 			connectionsByButton[secondButton] = connectionsByButton[secondButton] or {}
@@ -556,7 +609,7 @@ end
 
 -- Function to refresh inventory display
 refreshInventory = function()
-	print("[InventoryUI] refreshInventory called!")
+	--print("[InventoryUI] refreshInventory called!")
 	-- NOTE: Don't clear all button connections here - we'll only disconnect specific items that are being deleted
 
 	-- Get player inventory
@@ -622,6 +675,14 @@ refreshInventory = function()
 			equippedId = idValue.Value
 		end
 	end
+	local secondaryEquippedId = nil
+	local secondaryEquipped = stats:FindFirstChild("SecondaryEquipped")
+	if secondaryEquipped and secondaryEquipped:IsA("Folder") then
+		local idValue = secondaryEquipped:FindFirstChild("id")
+		if idValue then
+			secondaryEquippedId = idValue.Value
+		end
+	end
 	local equippedOrbId = nil
 	local equippedOrb = stats:FindFirstChild("EquippedOrb")
 	if equippedOrb and equippedOrb:IsA("Folder") then
@@ -644,10 +705,15 @@ refreshInventory = function()
 
 	   -- Sort inventory: equipped item (weapon/orb/armor) first, then others
 	   table.sort(inventoryData, function(a, b)
-		   -- Weapon
+		   -- Primary Weapon
 		   if equippedId then
 			   if a.id == equippedId and b.id ~= equippedId then return true end
 			   if b.id == equippedId and a.id ~= equippedId then return false end
+		   end
+		   -- Secondary Weapon
+		   if secondaryEquippedId then
+			   if a.id == secondaryEquippedId and b.id ~= secondaryEquippedId then return true end
+			   if b.id == secondaryEquippedId and a.id ~= secondaryEquippedId then return false end
 		   end
 		   -- Orb
 		   if equippedOrbId then
@@ -699,8 +765,12 @@ refreshInventory = function()
 							isEquipped = true
 						end
 					else
-						-- Check if it's a weapon equipped
+						-- Check if it's a weapon equipped (primary)
 						if equippedId and equippedId == itemData.id then
+							isEquipped = true
+						end
+						-- Check if it's a weapon equipped (secondary)
+						if not isEquipped and secondaryEquippedId and secondaryEquippedId == itemData.id then
 							isEquipped = true
 						end
 						-- Check if it's an orb equipped
@@ -787,9 +857,9 @@ local function setupInventoryListener()
 
 	local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
 	if inventoryChangedEvent then
-		print("[InventoryUI] InventoryChanged listener connected")
+		--print("[InventoryUI] InventoryChanged listener connected")
 		connections.inventoryChanged = inventoryChangedEvent.OnClientEvent:Connect(function()
-			print("[InventoryUI] InventoryChanged event FIRED!")
+			--print("[InventoryUI] InventoryChanged event FIRED!")
 			refreshInventory()
 			updateCapacityDisplay()
 		end)
@@ -800,9 +870,9 @@ local function setupInventoryListener()
 	-- Listen for EquippedChanged event for immediate UI update on equip
 	local equippedChangedEvent = ReplicatedStorage:FindFirstChild("EquippedChanged")
 	if equippedChangedEvent then
-		print("[InventoryUI] EquippedChanged listener connected")
+		--print("[InventoryUI] EquippedChanged listener connected")
 		connections.equippedChanged = equippedChangedEvent.OnClientEvent:Connect(function()
-			print("[InventoryUI] EquippedChanged event FIRED!")
+			--print("[InventoryUI] EquippedChanged event FIRED!")
 			refreshInventory()
 		end)
 	end

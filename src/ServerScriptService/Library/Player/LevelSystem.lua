@@ -7,7 +7,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
-local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
 local SFXEvent = ReplicatedStorage:FindFirstChild("SFXEvent")
 
 -- Function to save level and experience to datastore (throttled)
@@ -65,37 +65,8 @@ local function setupLevelMonitoring(player)
 end
 
 -- Monitor new players when they join
-Players.PlayerAdded:Connect(function(player)
-	-- Use task.spawn to ensure this doesn't block other PlayerAdded handlers
-	task.spawn(function()
-		-- Wait for PlayerDataStore to initialize stats folder
-		local ReplicatedStorage = game:GetService("ReplicatedStorage")
-		local playerSignalsFolder = ReplicatedStorage:WaitForChild("PlayerInitSignals", 10)
-		if not playerSignalsFolder then
-			warn("[LevelSystem] PlayerInitSignals folder not found for " .. player.Name)
-			return
-		end
-		
-		local signalName = "Player_" .. player.UserId
-		-- Wait for stats ready signal
-		local statsReadySignal = playerSignalsFolder:WaitForChild(signalName, 10)
-		if not statsReadySignal then
-			warn("[LevelSystem] Stats ready signal not found for " .. player.Name)
-			return
-		end
-		
-		-- Check if signal was already fired (check _Fired flag)
-		local firedFlag = statsReadySignal:FindFirstChild("_Fired")
-		if not firedFlag or not firedFlag.Value then
-			-- Wait for stats ready signal to fire
-			statsReadySignal.Event:Wait()
-		end
-		-- Stats are now ready
-		
-		-- Now setup level monitoring
-		setupLevelMonitoring(player)
-	end)
-end)
+-- PlayerAdded handler moved to Init.server.lua for centralized initialization
+-- LevelSystem is now initialized via PlayerDataStore signals
 
 -- Also setup for existing players when script loads
 for _, player in ipairs(Players:GetPlayers()) do

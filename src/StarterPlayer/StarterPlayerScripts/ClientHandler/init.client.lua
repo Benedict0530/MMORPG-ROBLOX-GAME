@@ -14,7 +14,7 @@ local function requireAllModules()
 	   if child:IsA("ModuleScript") then
 		   local ok, result = pcall(function() return require(child) end)
 		   if ok then
-			   print("[ClientHandler] Loaded module:", child.Name)
+			   --print("[ClientHandler] Loaded module:", child.Name)
 		   else
 			   warn("[ClientHandler] Failed to load module:", child.Name, result)
 		   end

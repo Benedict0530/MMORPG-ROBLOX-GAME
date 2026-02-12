@@ -35,7 +35,7 @@ local function healPlayer(player)
 		local currentHealth = stats:FindFirstChild("CurrentHealth")
 		if maxHealth and currentHealth then
 			currentHealth.Value = maxHealth.Value
-			print("[AdminCommands] Healed " .. player.Name)
+			--print("[AdminCommands] Healed " .. player.Name)
 		end
 	end
 end
@@ -48,7 +48,7 @@ local function setStats(adminPlayer, targetPlayer, statValue)
 	
 	-- Get OrbSpiritHandler to suspend stat listeners during admin change
 	local ServerScriptService = game:GetService("ServerScriptService")
-	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+	local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
 	
 	-- SUSPEND stat change listeners to prevent recursion
 	-- [REMOVED] OrbSpiritHandler.SetAdminStatChangeFlag
@@ -90,7 +90,7 @@ local function setStats(adminPlayer, targetPlayer, statValue)
 		currentMana.Value = maxMana.Value
 	end
 	
-	print("[AdminCommands] " .. adminPlayer.Name .. " set all combat stats to " .. statValue .. " for " .. targetPlayer.Name .. " (Dex capped at 300)")
+	--print("[AdminCommands] " .. adminPlayer.Name .. " set all combat stats to " .. statValue .. " for " .. targetPlayer.Name .. " (Dex capped at 300)")
 	
 	-- Save to datastore
 	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
@@ -107,7 +107,7 @@ end
 local function kickPlayer(admin, targetPlayer, reason)
 	reason = reason or "Kicked by admin"
 	targetPlayer:Kick(reason)
-	print("[AdminCommands] Admin " .. admin.Name .. " kicked " .. targetPlayer.Name .. " - Reason: " .. reason)
+	--print("[AdminCommands] Admin " .. admin.Name .. " kicked " .. targetPlayer.Name .. " - Reason: " .. reason)
 end
 
 -- Handle admin commands from client
@@ -134,14 +134,14 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 			end
 			targetPlayer = Players:FindFirstChild(targetName)
 			if not targetPlayer then
-				print("[AdminCommands] Target player '" .. tostring(targetName) .. "' not found for ResetStats")
+				--print("[AdminCommands] Target player '" .. tostring(targetName) .. "' not found for ResetStats")
 				return
 			end
 		end
 		
 		-- Get OrbSpiritHandler to suspend stat listeners during reset
 		local ServerScriptService = game:GetService("ServerScriptService")
-		local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+		local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
 		
 		-- SUSPEND stat change listeners to prevent recursion
 		OrbSpiritHandler.SetAdminStatChangeFlag(targetPlayer, true)
@@ -174,9 +174,9 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 			OrbSpiritHandler.ClearPlayerBaseStats(targetPlayer)
 			
 			if targetPlayer == player then
-				print("[AdminCommands] " .. player.Name .. " reset their own stats (and cleared orb base stats cache)")
+				--print("[AdminCommands] " .. player.Name .. " reset their own stats (and cleared orb base stats cache)")
 			else
-				print("[AdminCommands] " .. player.Name .. " reset stats for " .. targetPlayer.Name .. " (and cleared orb base stats cache)")
+				--print("[AdminCommands] " .. player.Name .. " reset stats for " .. targetPlayer.Name .. " (and cleared orb base stats cache)")
 			end
 			-- Save to datastore
 			local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
@@ -232,7 +232,7 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 		-- Get orbs folder
 		local orbsFolder = ServerStorage:FindFirstChild("Orbs")
 		if not orbsFolder then
-			print("[AdminCommands] ServerStorage.Orbs folder not found")
+			--print("[AdminCommands] ServerStorage.Orbs folder not found")
 			return
 		end
 		
@@ -248,8 +248,8 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 		local orbName, targetPlayer
 		
 		if #args < 1 then
-			print("[AdminCommands] Invalid orb command syntax. Use: /orb orbName OR /orb playerName orbName")
-			print("[AdminCommands] Examples: /orb FireOrb  OR  /orb PlayerName FireOrb")
+			--print("[AdminCommands] Invalid orb command syntax. Use: /orb orbName OR /orb playerName orbName")
+			--print("[AdminCommands] Examples: /orb FireOrb  OR  /orb PlayerName FireOrb")
 			return
 		end
 		
@@ -271,34 +271,34 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 		
 		-- Final check if orb exists
 		if not orbsFolder:FindFirstChild(orbName) then
-			print("[AdminCommands] Orb '" .. orbName .. "' not found in ServerStorage.Orbs")
+			--print("[AdminCommands] Orb '" .. orbName .. "' not found in ServerStorage.Orbs")
 			return
 		end
 		
 		-- Add orb to inventory (now inventory-based system)
 		local ok, itemId = InventoryManager.AddItem(targetPlayer, orbName, "spirit orb")
 		if ok then
-			print("[AdminCommands] " .. player.Name .. " gave orb '" .. orbName .. "' to " .. targetPlayer.Name)
+			--print("[AdminCommands] " .. player.Name .. " gave orb '" .. orbName .. "' to " .. targetPlayer.Name)
 			-- Fire InventoryChanged event to update client UI
 			local inventoryChangedEvent = ReplicatedStorage:FindFirstChild("InventoryChanged")
 			if inventoryChangedEvent then
 				inventoryChangedEvent:FireClient(targetPlayer)
 			end
 		else
-			print("[AdminCommands] Failed to give orb '" .. orbName .. "' to " .. targetPlayer.Name)
+			--print("[AdminCommands] Failed to give orb '" .. orbName .. "' to " .. targetPlayer.Name)
 		end
 	elseif command == "ResetData" then
 		-- Reset data for a specific player
 		local adminType = AdminId.GetAdminType(player.UserId)
 		if adminType ~= "verified" then
-			print("[AdminCommands] Only verified admins can use ResetData.")
+			--print("[AdminCommands] Only verified admins can use ResetData.")
 			return
 		end
 		
 		local targetName = args[1]
 		local targetPlayer = Players:FindFirstChild(targetName)
 		if not targetPlayer then
-			print("[AdminCommands] Target player '" .. tostring(targetName) .. "' not found for ResetData")
+			--print("[AdminCommands] Target player '" .. tostring(targetName) .. "' not found for ResetData")
 			return
 		end
 		
@@ -307,16 +307,16 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 		
 		local success = UnifiedDataStoreManager.ResetPlayerData(targetPlayer.UserId)
 		if success then
-			print("[AdminCommands] " .. player.Name .. " reset all data for " .. targetPlayer.Name)
+			--print("[AdminCommands] " .. player.Name .. " reset all data for " .. targetPlayer.Name)
 		else
-			print("[AdminCommands] Failed to reset data for " .. targetPlayer.Name)
+			--print("[AdminCommands] Failed to reset data for " .. targetPlayer.Name)
 		end
 	
 	elseif command == "ResetAllData" then
 		-- Reset data for all players (verified admins only)
 		local adminType = AdminId.GetAdminType(player.UserId)
 		if adminType ~= "verified" then
-			print("[AdminCommands] Only verified admins can use ResetAllData.")
+			--print("[AdminCommands] Only verified admins can use ResetAllData.")
 			return
 		end
 		
@@ -324,7 +324,7 @@ adminEvent.OnServerEvent:Connect(function(player, command, ...)
 		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 		
 		local successCount, failureCount = UnifiedDataStoreManager.ResetAllPlayersData()
-		print("[AdminCommands] " .. player.Name .. " reset all players data - Success: " .. successCount .. ", Failures: " .. failureCount)
+		--print("[AdminCommands] " .. player.Name .. " reset all players data - Success: " .. successCount .. ", Failures: " .. failureCount)
 	end
 end)
 
@@ -334,11 +334,7 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- Cleanup fly when character dies
-Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function(character)
-		-- Removed: Stop fly on respawn
-	end)
-end)
+-- PlayerAdded handler moved to Init.server.lua (was empty anyway)
 
 -- Removed: Continuous fly update loop
 -- Fly system has been removed

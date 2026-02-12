@@ -9,6 +9,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local QuestDataStore = {}
 
 local questStore = DataStoreService:GetDataStore("PlayerQuests")
+print("[QuestDataStore] 🗄️ DataStore 'PlayerQuests' initialized")
 
 -- Default quest data structure for each player
 local DEFAULT_QUEST_DATA = {
@@ -63,11 +64,11 @@ local function setupQuestFolder(player, data)
 				end
 			end
 			
-			print("[QuestDataStore] Quest", questId, "loaded with status:", statusValue.Value)
+			--print("[QuestDataStore] Quest", questId, "loaded with status:", statusValue.Value)
 		end
 	end
 	
-	print("[QuestDataStore] ✅ Quest folder setup for", player.Name)
+	--print("[QuestDataStore] ✅ Quest folder setup for", player.Name)
 end
 
 -- Get quest status for a player
@@ -101,7 +102,7 @@ end
 function QuestDataStore.AcceptQuest(player, questId)
 	local questFolder = player:FindFirstChild("Quests")
 	if not questFolder then
-		print("[QuestDataStore] ⚠️ Quests folder not found for", player.Name)
+		--print("[QuestDataStore] ⚠️ Quests folder not found for", player.Name)
 		return false
 	end
 
@@ -137,14 +138,14 @@ function QuestDataStore.AcceptQuest(player, questId)
 		dateCompletedValue.Value = ""
 		dateCompletedValue.Parent = questValue
 
-		print("[QuestDataStore] ✅ Quest", questId, "accepted for", player.Name)
+		--print("[QuestDataStore] ✅ Quest", questId, "accepted for", player.Name)
 		didChange = true
 	else
 		-- Quest already exists, just update status if needed
 		local statusValue = questValue:FindFirstChild("status")
 		if statusValue and statusValue.Value ~= "completed" then
 			statusValue.Value = "accepted"
-			print("[QuestDataStore] ✅ Quest", questId, "marked as accepted for", player.Name)
+			--print("[QuestDataStore] ✅ Quest", questId, "marked as accepted for", player.Name)
 			didChange = true
 		end
 	end
@@ -162,13 +163,13 @@ end
 function QuestDataStore.CompleteQuest(player, questId)
 	local questFolder = player:FindFirstChild("Quests")
 	if not questFolder then
-		print("[QuestDataStore] ⚠️ Quests folder not found for", player.Name)
+		--print("[QuestDataStore] ⚠️ Quests folder not found for", player.Name)
 		return false
 	end
 
 	local questValue = questFolder:FindFirstChild("Quest_" .. questId)
 	if not questValue then
-		print("[QuestDataStore] ⚠️ Quest", questId, "not found for", player.Name)
+		--print("[QuestDataStore] ⚠️ Quest", questId, "not found for", player.Name)
 		return false
 	end
 
@@ -182,7 +183,7 @@ function QuestDataStore.CompleteQuest(player, questId)
 			dateCompletedValue.Value = os.date("%Y-%m-%d %H:%M:%S")
 		end
 
-		print("[QuestDataStore] ✅ Quest", questId, "completed for", player.Name)
+		--print("[QuestDataStore] ✅ Quest", questId, "completed for", player.Name)
 		-- Mark quest data as pending for save
 		local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 		UnifiedDataStoreManager.MarkQuestDataPending(player.UserId)
@@ -237,7 +238,7 @@ function QuestDataStore.UpdateQuestProgressByEnemyType(player, questId, enemyTyp
 	end
 
 	if not objectiveIndex then
-		print("[QuestDataStore] ⚠️ No objective found for enemy type:", enemyType, "in quest", questId)
+		--print("[QuestDataStore] ⚠️ No objective found for enemy type:", enemyType, "in quest", questId)
 		return
 	end
 
@@ -254,7 +255,7 @@ function QuestDataStore.UpdateQuestProgressByEnemyType(player, questId, enemyTyp
 
 	-- Increment the progress
 	progressValue.Value = progressValue.Value + incrementAmount
-	print("[QuestDataStore] Quest", questId, "objective", objectiveIndex, "(", enemyType, ") progress updated to", progressValue.Value)
+	--print("[QuestDataStore] Quest", questId, "objective", objectiveIndex, "(", enemyType, ") progress updated to", progressValue.Value)
 
 	-- Mark quest data as pending for save
 	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
@@ -276,7 +277,7 @@ function QuestDataStore.UpdateQuestProgress(player, questId, progressAmount)
 	local progressValue = questValue:FindFirstChild("progress")
 	if progressValue then
 		progressValue.Value = progressAmount
-		print("[QuestDataStore] Quest", questId, "progress updated to", progressAmount, "for", player.Name)
+		--print("[QuestDataStore] Quest", questId, "progress updated to", progressAmount, "for", player.Name)
 	end
 end
 
@@ -318,22 +319,39 @@ end
 -- Load quest data for player
 function QuestDataStore.LoadQuestData(player)
 	local key = "PlayerQuests_" .. player.UserId
+	print("[QuestDataStore] 🔍 Loading quest data for", player.Name, "with key:", key)
+	
 	local data
 	local success, err = pcall(function()
 		data = questStore:GetAsync(key)
 	end)
 	
-	if not success or not data then
+	if not success then
+		warn("[QuestDataStore] ❌ Failed to load quest data for", player.Name, ":", err)
+		if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			warn("[QuestDataStore] ⚠️  Studio Access to API Services may be DISABLED!")
+		end
+		data = nil
+	end
+	
+	if not data then
 		-- No quest data exists, create default
+		print("[QuestDataStore] 📝 No existing quest data found, creating default for", player.Name)
 		data = table.clone(DEFAULT_QUEST_DATA)
-		local createSuccess = pcall(function()
+		local createSuccess, createErr = pcall(function()
 			questStore:SetAsync(key, data)
 		end)
-		if not createSuccess then
-			warn("[QuestDataStore] Failed to create quest data for player " .. player.Name .. " (" .. player.UserId .. ")")
+		if createSuccess then
+			print("[QuestDataStore] ✅ Created new quest datastore entry for", player.Name)
+		else
+			warn("[QuestDataStore] ❌ Failed to create quest data for player", player.Name, "(" .. player.UserId .. "):", createErr)
+			if tostring(createErr):find("502") or tostring(createErr):find("API Services") or tostring(createErr):find("Studio") then
+				warn("[QuestDataStore] ⚠️  Studio Access to API Services may be DISABLED!")
+			end
 		end
 	else
 		-- Ensure proper structure
+		print("[QuestDataStore] ✅ Loaded existing quest data for", player.Name, "| Quests count:", data.quests and #data.quests or 0)
 		if not data.quests then
 			data.quests = {}
 		end
@@ -348,7 +366,7 @@ function QuestDataStore.LoadQuestData(player)
 	-- Setup quest folder with loaded data
 	setupQuestFolder(player, data)
 	
-	print("[QuestDataStore] ✅ Quest data loaded for", player.Name)
+	print("[QuestDataStore] ✅ Quest folder setup complete for", player.Name)
 end
 
 -- Save quest data for player (called by UnifiedDataStoreManager)
@@ -356,20 +374,27 @@ function QuestDataStore.SaveQuestData(player)
 	local key = "PlayerQuests_" .. player.UserId
 	local questFolder = player:FindFirstChild("Quests")
 	
+	print("[QuestDataStore] 💾 Saving quest data for", player.Name, "with key:", key)
+	
 	-- Convert folder structure to table
 	local questsData = convertQuestFolderToTable(questFolder)
 	local data = {
 		quests = questsData
 	}
 	
+	print("[QuestDataStore] 📊 Quest data to save:", #questsData, "quests")
+	
 	local success, err = pcall(function()
 		questStore:SetAsync(key, data)
 	end)
 	
 	if success then
-		print("[QuestDataStore] ✅ Quest data saved for", player.Name)
+		print("[QuestDataStore] ✅ Quest data saved successfully for", player.Name)
 	else
 		warn("[QuestDataStore] ❌ Failed to save quest data for", player.Name, ":", err)
+		if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			warn("[QuestDataStore] ⚠️  Studio Access to API Services may be DISABLED!")
+		end
 	end
 	
 	return success
@@ -386,7 +411,7 @@ function QuestDataStore.GetQuestsByEnemyType(enemyType)
 	local normalizedEnemyType = string.gsub(enemyType, "%d+$", "") -- Remove trailing digits
 	normalizedEnemyType = string.gsub(normalizedEnemyType, "%s+$", "") -- Remove trailing spaces
 	
-	print("[QuestDataStore] 🔍 Searching quests for enemy type:", enemyType, "| Normalized:", normalizedEnemyType)
+	--print("[QuestDataStore] 🔍 Searching quests for enemy type:", enemyType, "| Normalized:", normalizedEnemyType)
 	
 	-- Loop through ALL quests and check if they have an objective matching this enemy type
 	for questId = 1, 100 do  -- Check up to 100 quests (you can adjust this number)
@@ -400,7 +425,7 @@ function QuestDataStore.GetQuestsByEnemyType(enemyType)
 				if objective.enemyType and objective.enemyType:lower() == normalizedEnemyType:lower() then
 					if not table.find(matchingQuests, questId) then
 						table.insert(matchingQuests, questId)
-						print("[QuestDataStore] ✅ Found matching quest:", questId, "for enemy:", normalizedEnemyType)
+						--print("[QuestDataStore] ✅ Found matching quest:", questId, "for enemy:", normalizedEnemyType)
 					end
 					break  -- Found a match in this quest, no need to check other objectives
 				end
@@ -411,12 +436,70 @@ function QuestDataStore.GetQuestsByEnemyType(enemyType)
 	return matchingQuests
 end
 
--- Initialize quest data on player join
-Players.PlayerAdded:Connect(function(player)
-	task.wait(0.2) -- Small delay to ensure player is fully loaded
-	QuestDataStore.LoadQuestData(player)
-end)
+-- Reset quest data for a specific player
+function QuestDataStore.ResetPlayerQuests(player)
+	if not player then
+		warn("[QuestDataStore] ❌ No player provided to ResetPlayerQuests")
+		return false
+	end
+	
+	local key = "PlayerQuests_" .. player.UserId
+	
+	-- 1. Remove existing Quests folder
+	local questFolder = player:FindFirstChild("Quests")
+	if questFolder then
+		questFolder:Destroy()
+		print("[QuestDataStore] 🗑️ Removed Quests folder for", player.Name)
+	end
+	
+	-- 2. Create fresh default data
+	local freshData = table.clone(DEFAULT_QUEST_DATA)
+	
+	-- 3. Save to DataStore (overwrites existing data)
+	local success, err = pcall(function()
+		questStore:SetAsync(key, freshData)
+	end)
+	
+	if not success then
+		warn("[QuestDataStore] ❌ Failed to reset quest data for", player.Name, ":", err)
+		return false
+	end
+	
+	-- 4. Setup new empty quest folder
+	setupQuestFolder(player, freshData)
+	
+	print("[QuestDataStore] ✅ Quest data reset for", player.Name)
+	return true
+end
 
-print("[QuestDataStore] Quest Data Store loaded successfully")
+-- WIPE ENTIRE QUEST DATASTORE FOR ALL PLAYERS (DANGEROUS!)
+function QuestDataStore.WipeAllQuestData()
+	warn("[QuestDataStore] ⚠️⚠️⚠️ WIPING ENTIRE QUEST DATASTORE ⚠️⚠️⚠️")
+	
+	local successCount = 0
+	local failureCount = 0
+	
+	-- Reset all currently online players
+	for _, player in ipairs(Players:GetPlayers()) do
+		local success = QuestDataStore.ResetPlayerQuests(player)
+		if success then
+			successCount = successCount + 1
+		else
+			failureCount = failureCount + 1
+		end
+	end
+	
+	warn("[QuestDataStore] 🗑️ Complete - Reset " .. successCount .. " players, " .. failureCount .. " failures")
+	warn("[QuestDataStore] ⚠️ Note: Only ONLINE players were reset. Offline players will keep their quest data until they join and get manually reset.")
+	
+	return successCount, failureCount
+end
+
+--  QuestDataStore.WipeAllQuestData()
+
+-- Initialize quest data on player join
+-- PlayerAdded handler moved to Init.server.lua for centralized initialization
+
+--print("[QuestDataStore] Quest Data Store loaded successfully")
 
 return QuestDataStore

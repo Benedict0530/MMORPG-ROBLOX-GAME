@@ -54,7 +54,7 @@ NpcQuestData.Quests = {
 		-- Quest rewards
 		rewards = {
 			experience = 50,
-			gold = 100
+			gold = 25
 		},
 		
 		-- Quest status
@@ -110,8 +110,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 100,
-			gold = 200
+			experience = 150,
+			gold = 50
 		},
 		
 		-- Quest status
@@ -167,8 +167,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 200,
-			gold = 250
+			experience = 300,
+			gold = 100
 		},
 		
 		-- Quest status
@@ -225,7 +225,7 @@ NpcQuestData.Quests = {
 		-- Quest rewards
 		rewards = {
 			experience = 500,
-			gold = 500
+			gold = 150
 		},
 		
 		-- Quest status
@@ -288,7 +288,7 @@ NpcQuestData.Quests = {
 		-- Quest rewards
 		rewards = {
 			experience = 1000,
-			gold = 1000
+			gold = 350
 		},
 		
 		-- Quest status
@@ -352,8 +352,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 75,
-			gold = 150
+			experience = 1200,
+			gold = 400
 		},
 		
 		-- Quest status
@@ -409,8 +409,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 150,
-			gold = 300
+			experience = 1500,
+			gold = 450
 		},
 		
 		-- Quest status
@@ -466,8 +466,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 300,
-			gold = 600
+			experience = 1800,
+			gold = 550
 		},
 		
 		-- Quest status
@@ -523,8 +523,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 400,
-			gold = 800
+			experience = 2200,
+			gold = 650
 		},
 		
 		-- Quest status
@@ -580,8 +580,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 700,
-			gold = 1400
+			experience = 2700,
+			gold = 850
 		},
 		
 		-- Quest status
@@ -643,8 +643,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 1500,
-			gold = 2000
+			experience = 3500,
+			gold = 1200
 		},
 		
 		-- Quest status
@@ -700,8 +700,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 150,
-			gold = 250
+			experience = 4000,
+			gold = 1500
 		},
 		
 		-- Quest status
@@ -757,8 +757,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 200,
-			gold = 400
+			experience = 4500,
+			gold = 1750
 		},
 		
 		-- Quest status
@@ -814,8 +814,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 400,
-			gold = 500
+			experience = 5000,
+			gold = 2000
 		},
 		
 		-- Quest status
@@ -871,8 +871,8 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 900,
-			gold = 1200
+			experience = 6000,
+			gold = 2500
 		},
 		
 		-- Quest status
@@ -934,7 +934,7 @@ NpcQuestData.Quests = {
 		
 		-- Quest rewards
 		rewards = {
-			experience = 2000,
+			experience = 8000,
 			gold = 3000
 		},
 		
@@ -1056,6 +1056,6 @@ function NpcQuestData.GetRewards(questId)
 	return nil
 end
 
-print("[NpcQuestData] Quest data loaded successfully")
+--print("[NpcQuestData] Quest data loaded successfully")
 
 return NpcQuestData

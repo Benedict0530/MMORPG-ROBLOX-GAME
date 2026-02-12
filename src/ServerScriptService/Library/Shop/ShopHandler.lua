@@ -69,6 +69,7 @@ end
 
 
 local shopDebounce = {} -- [userId] = true/false
+local sellLocks = {} -- [itemId] = true while selling
 
 local function generateUniqueItemId(itemName, player)
     local userId = player and player.UserId or "0"
@@ -118,6 +119,7 @@ shopEvent.OnServerEvent:Connect(function(player, action, itemName, itemId)
         -- Remove by itemId, and prevent selling equipped item
         local stats = player:FindFirstChild("Stats")
         local equippedId = nil
+        local secondaryEquippedId = nil
         local equippedOrbId = nil
         local equippedArmorIds = {}
         if stats then
@@ -127,6 +129,14 @@ shopEvent.OnServerEvent:Connect(function(player, action, itemName, itemId)
                 local idValue = equippedFolder:FindFirstChild("id")
                 if idValue then
                     equippedId = idValue.Value
+                end
+            end
+            -- Check secondary equipped weapon
+            local secondaryEquippedFolder = stats:FindFirstChild("SecondaryEquipped")
+            if secondaryEquippedFolder and secondaryEquippedFolder:IsA("Folder") then
+                local idValue = secondaryEquippedFolder:FindFirstChild("id")
+                if idValue then
+                    secondaryEquippedId = idValue.Value
                 end
             end
             -- Check equipped orbs
@@ -153,6 +163,10 @@ shopEvent.OnServerEvent:Connect(function(player, action, itemName, itemId)
         if itemId and equippedId and itemId == equippedId then
             return
         end
+        -- Prevent selling secondary equipped weapon
+        if itemId and secondaryEquippedId and itemId == secondaryEquippedId then
+            return
+        end
         -- Prevent selling equipped orbs
         if itemId and equippedOrbId and itemId == equippedOrbId then
             return
@@ -163,9 +177,27 @@ shopEvent.OnServerEvent:Connect(function(player, action, itemName, itemId)
                 return
             end
         end
-        local removed = false
+        -- Server-side lock to prevent concurrent sells of the same item
         if itemId then
-            removed = InventoryManager.RemoveItem(player, itemId)
+            if sellLocks[itemId] then
+                return -- Already being sold
+            end
+            sellLocks[itemId] = true
+        end
+        local removed = false
+        -- Double-check item exists in inventory before removing
+        if itemId then
+            local inventory = InventoryManager.GetInventory(player)
+            local found = false
+            for _, item in ipairs(inventory) do
+                if item.id == itemId then
+                    found = true
+                    break
+                end
+            end
+            if found then
+                removed = InventoryManager.RemoveItem(player, itemId)
+            end
         end
         if SFXEvent then
             SFXEvent:FireClient(player, "Sell")
@@ -173,6 +205,9 @@ shopEvent.OnServerEvent:Connect(function(player, action, itemName, itemId)
         if removed then
             money.Value = money.Value + price
             UnifiedDataStoreManager.SaveMoney(player, false)
+        end
+        if itemId then
+            sellLocks[itemId] = nil
         end
     end
 end)

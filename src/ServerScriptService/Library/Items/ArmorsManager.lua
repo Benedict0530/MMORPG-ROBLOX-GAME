@@ -22,6 +22,9 @@ function ArmorsManager.SetEquippedArmor(player, armorName, itemId)
 	if nameValue then nameValue.Value = armorName end
 	if idValue then idValue.Value = itemId end
 	UnifiedDataStoreManager.SaveStats(player, false)
+	-- Also save inventory to ensure equipped state is persisted
+	local InventoryManager = require(script.Parent.InventoryManager)
+	InventoryManager.SaveInventory(player, true)
 	-- Wait for character and required parts to exist before attaching armor accessory
 	local maxWait, waited = 3, 0
 	while (not player.Character or not player.Character:FindFirstChild("Humanoid")) and waited < maxWait do
@@ -52,7 +55,7 @@ function ArmorsManager.CloneAndAttachArmorAccessory(player, armorName, armorType
 	if not armorAccessoriesFolder then return end
 	local armorFolder = armorAccessoriesFolder:FindFirstChild(armorName)
 	if armorFolder then
-		print("[ArmorsManager] Found matching armor accessory folder for '" .. armorName .. "'")
+		--print("[ArmorsManager] Found matching armor accessory folder for '" .. armorName .. "'")
 	else
 		warn("[ArmorsManager] No matching armor accessory folder found for '" .. armorName .. "'")
 		return
@@ -144,10 +147,15 @@ local function setupPlayerConnections(player)
 	end
 end
 
+-- Export setupPlayerConnections for Init.server.lua to call
+ArmorsManager.setupPlayerConnections = setupPlayerConnections
+
 for _, player in ipairs(Players:GetPlayers()) do
 	setupPlayerConnections(player)
 end
-Players.PlayerAdded:Connect(setupPlayerConnections)
+-- PlayerAdded handler moved to Init.server.lua for centralized initialization
+-- setupPlayerConnections is called from Init.server.lua
+
 -- Unequip and remove armor accessory from character (Suit, Helmet, Legs, Shoes)
 function ArmorsManager.UnequipAndRemoveAccessory(player, armorType)
 	local stats = player:FindFirstChild("Stats")

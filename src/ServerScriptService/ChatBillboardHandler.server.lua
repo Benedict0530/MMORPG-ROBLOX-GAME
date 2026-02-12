@@ -6,9 +6,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
+local MessagingService = game:GetService("MessagingService")
 
 -- Bad words list (extra strict layer)
-local badwords = require(script.Parent.Library.badwords)
+local badwords = require(script.Parent.Library.Admin.badwords)
+local AdminId = require(ReplicatedStorage.Modules.AdminId)
 
 -- =====================
 -- RemoteEvents
@@ -21,7 +23,11 @@ local broadcastEvent = Instance.new("RemoteEvent")
 broadcastEvent.Name = "ChatBroadcastEvent"
 broadcastEvent.Parent = ReplicatedStorage
 
-print("[InGameChat] ✓ RemoteEvents created")
+local worldChatEvent = Instance.new("RemoteEvent")
+worldChatEvent.Name = "WorldChatEvent"
+worldChatEvent.Parent = ReplicatedStorage
+
+--print("[InGameChat] ✓ RemoteEvents created")
 
 -- =====================
 -- Configuration
@@ -169,13 +175,95 @@ local function createChatBillboard(player, message)
 end
 
 -- =====================
+-- Cross-Server World Chat (Admin Only)
+-- =====================
+
+-- Subscribe to cross-server messages
+local function setupWorldChatSubscription()
+	local success, connection = pcall(function()
+		return MessagingService:SubscribeAsync("AdminWorldChat", function(message)
+			local data = message.Data
+			if data and data.playerName and data.message then
+				-- Fire to all clients on this server
+				worldChatEvent:FireAllClients(data.playerName, data.message)
+			end
+		end)
+	end)
+	
+	if not success then
+		warn("[WorldChat] Failed to subscribe:", connection)
+	else
+		print("[WorldChat] ✓ Cross-server subscription active")
+	end
+end
+
+-- Publish message cross-server
+local function publishWorldChat(playerName, message)
+	local success, err = pcall(function()
+		MessagingService:PublishAsync("AdminWorldChat", {
+			playerName = playerName,
+			message = message,
+			timestamp = os.time()
+		})
+	end)
+	
+	if not success then
+		warn("[WorldChat] Failed to publish:", err)
+		return false
+	end
+	
+	return true
+end
+
+-- Initialize subscription
+setupWorldChatSubscription()
+
+-- =====================
 -- Handle incoming chat
 -- =====================
 
 chatEvent.OnServerEvent:Connect(function(player, message)
 	if typeof(message) ~= "string" then return end
 	if message == "" then return end
+	
+	-- Check for /awc command (Admin World Chat)
+	if message:sub(1, 5) == "/awc " then
+		-- Check if player is verified admin
+		local adminType = AdminId.GetAdminType(player.UserId)
+		if adminType ~= "verified" then
+			warn("[WorldChat]", player.Name, "attempted /awc without verified status")
+			return
+		end
+		
+		-- Extract message after /awc
+		local worldMessage = message:sub(6):gsub("^%s+", ""):gsub("%s+$", "")
+		if worldMessage == "" then return end
+		
+		-- Remove quotes if present
+		if worldMessage:sub(1, 1) == '"' and worldMessage:sub(-1) == '"' then
+			worldMessage = worldMessage:sub(2, -2)
+		end
+		
+		if #worldMessage > MAX_MESSAGE_LENGTH then
+			worldMessage = worldMessage:sub(1, MAX_MESSAGE_LENGTH)
+		end
+		
+		-- Filter message
+		worldMessage = worldMessage
+			:gsub("<", "")
+			:gsub(">", "")
+			:gsub("rbxassetid://", "")
+		worldMessage = censorBadWordsCaseInsensitive(worldMessage)
+		worldMessage = robloxFilter(player, worldMessage)
+		
+		-- Publish cross-server (MessagingService will broadcast to ALL servers including this one)
+		local published = publishWorldChat(player.DisplayName, worldMessage)
+		
+		print("[WorldChat]", player.Name, "sent:", worldMessage, "| Published:", published)
+		return
+	end
 
+	-- Regular chat message handling
 	if #message > MAX_MESSAGE_LENGTH then
 		message = message:sub(1, MAX_MESSAGE_LENGTH)
 	end
@@ -195,7 +283,7 @@ chatEvent.OnServerEvent:Connect(function(player, message)
 	createChatBillboard(player, message)
 	broadcastEvent:FireAllClients(player.DisplayName, message)
 
-	print("[InGameChat]", player.Name, ":", message)
+	--print("[InGameChat]", player.Name, ":", message)
 end)
 
-print("[InGameChat] ✓ Custom chat billboard system ready")
+--print("[InGameChat] ✓ Custom chat billboard system ready")

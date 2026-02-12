@@ -10,8 +10,9 @@ local WeaponDataStore = require(script.Parent:WaitForChild("WeaponDataStore"))
 local EnemyStatsDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("EnemyStatsDataStore"))
 local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
 local SoundModule = require(ReplicatedStorage.Modules.SoundModule)
-local PVPHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PVPHandler"))
-local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+local PVPHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("PVPHandler"))
+local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
+local UltimateHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("UltimateHandler"))
 
 -- Create RemoteEvent for showing enemy damage text on clients
 local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
@@ -143,13 +144,16 @@ local function applyOrbHighlightToTarget(targetModel, orbName)
 end
 
 -- Modular attack logic for each weapon
-function WeaponManager.PerformAttack(player, tool, weaponSpeed)
-	print("[WeaponManager] PerformAttack called for player=" .. tostring(player) .. ", tool=" .. tostring(tool) .. ", weaponSpeed=" .. tostring(weaponSpeed))
+-- Optional weaponNameOverride parameter allows using secondary weapon stats
+function WeaponManager.PerformAttack(player, tool, weaponSpeed, weaponNameOverride)
+	local effectiveWeaponName = weaponNameOverride or tool.Name
+	local attackType = weaponNameOverride and "SECONDARY" or "PRIMARY"
+	--print("[WeaponManager] PerformAttack called - Player: " .. tostring(player.Name) .. " | Tool: " .. tostring(tool.Name) .. " | Attack Type: " .. attackType .. " | Effective Weapon: " .. effectiveWeaponName)
 	if not player or not tool or not tool.Name then 
 		warn("[WeaponManager] PerformAttack called with invalid args: player=" .. tostring(player) .. ", tool=" .. tostring(tool))
 		return 
 	end
-    
+    UltimateHandler.AddUltimateCharge(player, 1)
 	local character = player.Character
 	if not character then
 		warn("[WeaponManager] Player " .. player.Name .. " has no character.")
@@ -166,18 +170,22 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 	end
 
 	-- Passed validation, perform attack
-	local weaponName = tool.Name
+	local weaponName = effectiveWeaponName
 	local weaponStats = WeaponData.GetWeaponStats(weaponName)
 	local speed = weaponStats and weaponStats.speed or 1
+	
 	-- Enforce server-side minimum interval between attacks based on weapon speed (animation duration)
-	local minInterval = 0.4
-	local now = tick()
-	local lastAttack = lastAttackTimes[player] or 0
-	if (now - lastAttack) < minInterval then
-		print("[WeaponManager] Attack skipped for " .. player.Name .. " due to cooldown. Time since last: " .. tostring(now - lastAttack))
-		return
+	-- Only check cooldown for PRIMARY attacks (not secondary, which happens in the same swing)
+	if not weaponNameOverride then
+		local minInterval = 0.4
+		local now = tick()
+		local lastAttack = lastAttackTimes[player] or 0
+		if (now - lastAttack) < minInterval then
+			--print("[WeaponManager] Attack skipped for " .. player.Name .. " due to cooldown. Time since last: " .. tostring(now - lastAttack))
+			return
+		end
+		lastAttackTimes[player] = now
 	end
-	lastAttackTimes[player] = now
 
 	local hitPart = tool:FindFirstChild("HitPart")
 	if not hitPart then
@@ -185,7 +193,7 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 		return
 	end
 
-	print("[WeaponManager] Attack proceeding for " .. player.Name .. " with tool " .. tool.Name)
+	--print("[WeaponManager] Attack proceeding for " .. player.Name .. " with tool " .. tool.Name)
 
 	-- Trigger slash particle effects if player has spirit equipped
 	task.spawn(function()
@@ -213,7 +221,7 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 	end
 
 	-- Only allow one hit per enemy per trigger (Touched for NPCs only)
-	local function onTouched(hit)
+	local function onTouched(hit)	
 		-- ===== ENEMY DAMAGE =====
 		local enemyModel = hit:FindFirstAncestorOfClass("Model")
 		if enemyModel and enemyModel:FindFirstChild("Humanoid") then
@@ -252,6 +260,8 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 			local oldHealth = enemyHealth.Value
 			enemyHealth.Value = math.max(oldHealth - damage, 0)
             
+			--print("[WeaponManager] " .. player.Name .. " hit enemy '" .. enemyName .. "' | Weapon: " .. weaponName .. " | Damage: " .. tostring(damage) .. " | Crit: " .. tostring(isCritical) .. " | Enemy HP: " .. tostring(enemyHealth.Value) .. "/" .. tostring(oldHealth))
+            
 			-- Track damage dealt by this player to this enemy
 			-- Create or update the player damage tracker on the enemy model
 			local playerDamageTracker = enemyModel:GetAttribute("PlayerDamageTracker")
@@ -274,14 +284,13 @@ function WeaponManager.PerformAttack(player, tool, weaponSpeed)
 			
 			SoundModule.playSoundInRange("Hit", enemyRoot.Position, "SFX", 100, false, 1)
 			damageEvent:FireAllClients(enemyModel, damage, isCritical, true)
-			print("[WeaponManager] " .. player.Name .. " hit enemy '" .. enemyName .. "' for " .. tostring(damage) .. " damage (crit: " .. tostring(isCritical) .. ") | Enemy health: " .. tostring(enemyHealth.Value) .. "/" .. tostring(oldHealth))
 
 			-- Handle enemy death
 			if enemyHealth.Value <= 0 then
 				local humanoid = enemyModel:FindFirstChild("Humanoid")
 				if humanoid then humanoid.Health = 0 end
 				deadEnemies[enemyModel] = true
-				print("[WeaponManager] Enemy '" .. enemyName .. "' killed by " .. player.Name)
+				--print("[WeaponManager] Enemy '" .. enemyName .. "' killed by " .. player.Name .. " with " .. weaponName)
 			end
 		end
 	end
@@ -316,7 +325,7 @@ end
 
 -- Connect weapon/tool usage to effects and logic
 function WeaponManager.ConnectTool(tool, player)
-	print("[WeaponManager] ConnectTool called for tool '" .. tostring(tool and tool.Name) .. "' and player '" .. tostring(player and player.Name) .. "'")
+	--print("[WeaponManager] ConnectTool called for tool '" .. tostring(tool and tool.Name) .. "' and player '" .. tostring(player and player.Name) .. "'")
 	if not tool or not tool.Name then 
 		warn("[WeaponManager] Cannot connect tool: tool is nil or has no name")
 		return 
@@ -337,7 +346,7 @@ function WeaponManager.ConnectTool(tool, player)
 	if toolConnections[uniqueToolId] then
 		toolConnections[uniqueToolId]:Disconnect()
 		toolConnections[uniqueToolId] = nil
-		print("[WeaponManager] Cleaned up previous connection for tool ID '" .. uniqueToolId .. "'")
+		--print("[WeaponManager] Cleaned up previous connection for tool ID '" .. uniqueToolId .. "'")
 	end
 
 	-- Remove from playerToolIds if present (avoid duplicates)
@@ -349,7 +358,7 @@ function WeaponManager.ConnectTool(tool, player)
 	end
 
 	-- Robustly wait for SwingEvent (up to 2 seconds)
-	print("[WeaponManager] Waiting for SwingEvent on tool '" .. tool.Name .. "' for player '" .. player.Name .. "'")
+	--print("[WeaponManager] Waiting for SwingEvent on tool '" .. tool.Name .. "' for player '" .. player.Name .. "'")
 	local swingEvent = tool:FindFirstChild("SwingEvent")
 	local maxWait = 2
 	local waited = 0
@@ -363,14 +372,15 @@ function WeaponManager.ConnectTool(tool, player)
 		warn("[WeaponManager] Tool '" .. tool.Name .. "' does not have a SwingEvent after waiting " .. tostring(maxWait) .. " seconds")
 		return
 	end
-	print("[WeaponManager] Found SwingEvent for tool '" .. tool.Name .. "' for player '" .. player.Name .. "'")
+	--print("[WeaponManager] Found SwingEvent for tool '" .. tool.Name .. "' for player '" .. player.Name .. "'")
 
 	-- Store player reference with the tool for validation
 	tool:SetAttribute("_OwnerUserId", player.UserId)
 
 	-- Connect the event with closure capturing tool AND player
 	local function onSwingEvent(attackingPlayer)
-		print("[WeaponManager] onSwingEvent fired for player '" .. tostring(attackingPlayer and attackingPlayer.Name) .. "' with tool '" .. tostring(tool and tool.Name) .. "'")
+		--print("[WeaponManager] ========== SWING EVENT START ==========")
+		--print("[WeaponManager] onSwingEvent fired for player '" .. tostring(attackingPlayer and attackingPlayer.Name) .. "' with tool '" .. tostring(tool and tool.Name) .. "'")
 		if blockSwingEvent[attackingPlayer] then
 			warn("[WeaponManager] Ignoring swing event for " .. attackingPlayer.Name .. " while equipping")
 			return
@@ -389,14 +399,43 @@ function WeaponManager.ConnectTool(tool, player)
 			isToolInPlayerInventory = true
 		end
 		if not isToolInPlayerInventory then
-			print("[WeaponManager] Tool parent: " .. tostring(tool.Parent) .. ", expected player/backpack/character")
+			--print("[WeaponManager] Tool parent: " .. tostring(tool.Parent) .. ", expected player/backpack/character")
 			return
 		end
 		-- Look up weapon speed on the server for safety
 		local weaponStats = WeaponData.GetWeaponStats(tool.Name)
 		local weaponSpeed = weaponStats and weaponStats.speed or 1
-		print("[WeaponManager] Calling PerformAttack for player '" .. attackingPlayer.Name .. "' with tool '" .. tool.Name .. "'")
+		--print("[WeaponManager] Primary weapon: " .. tool.Name .. " | Speed: " .. tostring(weaponSpeed))
+		
+		-- Perform attack for primary weapon
 		WeaponManager.PerformAttack(attackingPlayer, tool, weaponSpeed)
+		
+		-- Check if player has secondary weapon equipped and perform attack for it too
+		local stats = attackingPlayer:FindFirstChild("Stats")
+		if stats then
+			local secondaryEquipped = stats:FindFirstChild("SecondaryEquipped")
+			if secondaryEquipped and secondaryEquipped:IsA("Folder") then
+				local secondaryName = secondaryEquipped:FindFirstChild("name")
+				local secondaryId = secondaryEquipped:FindFirstChild("id")
+				if secondaryName and secondaryName.Value ~= "" then
+					--print("[WeaponManager] Secondary weapon detected: " .. secondaryName.Value .. " (ID: " .. tostring(secondaryId and secondaryId.Value or "N/A") .. ")")
+					-- Get secondary weapon stats
+					local secondaryWeaponStats = WeaponData.GetWeaponStats(secondaryName.Value)
+					local secondaryWeaponSpeed = secondaryWeaponStats and secondaryWeaponStats.speed or 1
+					--print("[WeaponManager] Triggering secondary attack | Weapon: " .. secondaryName.Value .. " | Speed: " .. tostring(secondaryWeaponSpeed))
+					-- Add small delay before secondary attack to ensure sounds play distinctly
+					task.wait(0.1)
+					-- Perform attack for secondary weapon (using tool name but secondary weapon stats)
+					-- We pass the tool reference but the damage calculation will use the secondary weapon
+					WeaponManager.PerformAttack(attackingPlayer, tool, secondaryWeaponSpeed, secondaryName.Value)
+				else
+					--print("[WeaponManager] No secondary weapon equipped (name is empty)")
+				end
+			else
+				--print("[WeaponManager] No SecondaryEquipped folder found in Stats")
+			end
+		end
+		--print("[WeaponManager] ========== SWING EVENT END ==========")
 	end
 
 	local connection
@@ -410,7 +449,7 @@ function WeaponManager.ConnectTool(tool, player)
 
 	toolConnections[uniqueToolId] = connection
 	table.insert(playerToolIds[player.UserId], uniqueToolId)
-	   print("[WeaponManager] Connected tool '" .. tool.Name .. "' for player " .. player.Name .. " (toolId: " .. uniqueToolId .. ")")
+	   --print("[WeaponManager] Connected tool '" .. tool.Name .. "' for player " .. player.Name .. " (toolId: " .. uniqueToolId .. ")")
 
 	   -- Fire WeaponConnected RemoteEvent to client to signal weapon is ready
 	   local weaponConnectedEvent = ReplicatedStorage:FindFirstChild("WeaponConnected")
@@ -439,6 +478,7 @@ function WeaponManager.UnequipWeapon(player)
 	local nameValue = equipped:FindFirstChild("name")
 	local equippedId = idValue and idValue.Value or ""
 	local equippedName = nameValue and nameValue.Value or ""
+	-- Clear equipped stats
 	if idValue then idValue.Value = "" end
 	if nameValue then nameValue.Value = "" end
 	-- Remove tool from character and backpack
@@ -452,6 +492,9 @@ function WeaponManager.UnequipWeapon(player)
 			end
 		end
 	end
+	-- Ensure DataStore stats are updated immediately
+	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
+	UnifiedDataStoreManager.SaveStats(player, false)
 end
 
 return WeaponManager

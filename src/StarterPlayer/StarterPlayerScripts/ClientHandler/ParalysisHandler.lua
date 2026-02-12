@@ -46,7 +46,7 @@ local function disableMovement()
 		end
 	end
 	
-	print("[ParalysisHandler] Movement disabled and animations cancelled")
+	--print("[ParalysisHandler] Movement disabled and animations cancelled")
 end
 
 -- Function to enable movement
@@ -63,7 +63,7 @@ local function enableMovement()
 		resumeAnimationEvent:FireServer()
 	end
 	
-	print("[ParalysisHandler] Movement enabled, animations resuming")
+	--print("[ParalysisHandler] Movement enabled, animations resuming")
 end
 
 -- Function to jump and hold player in air
@@ -77,7 +77,7 @@ local function jumpAndHoldInAir()
 		
 		-- Make the character jump
 		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-		print("[ParalysisHandler] Player jumped with reduced power")
+		--print("[ParalysisHandler] Player jumped with reduced power")
 		
 		-- Wait a moment for jump to register, then hold them in air
 		task.wait(0.1)
@@ -91,7 +91,7 @@ local function jumpAndHoldInAir()
 		paralysisBodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
 		paralysisBodyVelocity.Parent = humanoidRootPart
 		
-		print("[ParalysisHandler] Player held in air")
+		--print("[ParalysisHandler] Player held in air")
 		
 		-- Wait 1 second then remove the body velocity to let them fall
 		task.wait(1.0)
@@ -102,7 +102,7 @@ local function jumpAndHoldInAir()
 			paralysisBodyVelocity = nil
 		end
 		
-		print("[ParalysisHandler] Player released to fall")
+		--print("[ParalysisHandler] Player released to fall")
 	end
 end
 
@@ -111,7 +111,7 @@ local function ragdollPlayer(duration)
 	if not character or isRagdolled then return end
 	
 	isRagdolled = true
-	print("[ParalysisHandler] Player ragdolled")
+	--print("[ParalysisHandler] Player ragdolled")
 	
 	-- Disable getting up so character stays ragdolled
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
@@ -126,7 +126,7 @@ local function ragdollPlayer(duration)
 	humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
 	
 	isRagdolled = false
-	print("[ParalysisHandler] Ragdoll ended")
+	--print("[ParalysisHandler] Ragdoll ended")
 end
 
 -- Function to apply knockback and ragdoll together
@@ -140,7 +140,7 @@ local function knockbackAndRagdoll(direction, force, duration)
 		
 		-- Apply knockback velocity
 		humanoidRootPart.AssemblyLinearVelocity = direction * force
-		print("[ParalysisHandler] Knockback applied with force: " .. force)
+		--print("[ParalysisHandler] Knockback applied with force: " .. force)
 		
 		-- Immediately ragdoll the player (they fly out while ragdolled)
 		ragdollPlayer(duration or 1.0)
@@ -152,11 +152,11 @@ ParalysisEvent.OnClientEvent:Connect(function(duration)
 	duration = duration or 1 -- Default to 1 second if not specified
 	
 	if isParalyzed then
-		print("[ParalysisHandler] Already paralyzed, ignoring additional paralysis")
+		--print("[ParalysisHandler] Already paralyzed, ignoring additional paralysis")
 		return
 	end
 	
-	print("[ParalysisHandler] Paralysis effect triggered for " .. duration .. " seconds")
+	--print("[ParalysisHandler] Paralysis effect triggered for " .. duration .. " seconds")
 	
 	-- Disable movement
 	disableMovement()
@@ -173,7 +173,7 @@ ParalysisEvent.OnClientEvent:Connect(function(duration)
 	-- Re-enable movement
 	enableMovement()
 	
-	print("[ParalysisHandler] Paralysis effect ended")
+	--print("[ParalysisHandler] Paralysis effect ended")
 end)
 
 -- Handle character respawn
@@ -184,27 +184,27 @@ player.CharacterAdded:Connect(function(newCharacter)
 	isParalyzed = false
 	isRagdolled = false
 	isParalyzedValue.Value = false -- Reset paralysis state
-	print("[ParalysisHandler] Character respawned, reset paralysis and ragdoll state")
+	--print("[ParalysisHandler] Character respawned, reset paralysis and ragdoll state")
 end)
 
 -- Handle knockback and ragdoll effect when hit 2nd time (during paralysis)
 KnockbackEvent.OnClientEvent:Connect(function(direction, force)
 	if not isParalyzed then
-		print("[ParalysisHandler] Not currently paralyzed, ignoring knockback")
+		--print("[ParalysisHandler] Not currently paralyzed, ignoring knockback")
 		return
 	end
 	
 	if isRagdolled then
-		print("[ParalysisHandler] Already ragdolled, ignoring knockback")
+		--print("[ParalysisHandler] Already ragdolled, ignoring knockback")
 		return
 	end
 	
-	print("[ParalysisHandler] 2nd hit during paralysis! Knockback and ragdoll triggered")
+	--print("[ParalysisHandler] 2nd hit during paralysis! Knockback and ragdoll triggered")
 	
 	-- Apply knockback and ragdoll (player flies out while ragdolled)
 	knockbackAndRagdoll(direction, force, 1.0)
 	
-	print("[ParalysisHandler] Knockback and ragdoll effect ended")
+	--print("[ParalysisHandler] Knockback and ragdoll effect ended")
 end)
 
 return ParalysisHandler

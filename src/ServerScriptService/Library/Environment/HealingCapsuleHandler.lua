@@ -168,7 +168,7 @@ RunService.Heartbeat:Connect(function()
 						end
 					end
 				else
-					print("[HealingCapsuleHandler] Stats not found for", player.Name)
+					--print("[HealingCapsuleHandler] Stats not found for", player.Name)
 				end
 			else
 				-- Player no longer sitting in this capsule

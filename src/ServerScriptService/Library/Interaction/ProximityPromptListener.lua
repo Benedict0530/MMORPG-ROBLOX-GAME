@@ -1,8 +1,8 @@
 -- ProximityPromptListener.lua
 -- Listens for all ProximityPrompt.Triggered events in Workspace and fires a callback
 
-
-local ShopHandler = require(script.Parent:FindFirstChild("ShopHandler"))
+local ServerScriptService = game:GetService("ServerScriptService")
+local ShopHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Shop"):WaitForChild("ShopHandler"))
 local ProximityPromptListener = {}
 
 local Workspace = game:GetService("Workspace")
@@ -23,24 +23,24 @@ end
 
 
 local function defaultCallback(prompt, player)
-	print("[ProximityPromptListener] Prompt triggered:", prompt:GetFullName(), "by player:", player and player.Name)
+	--print("[ProximityPromptListener] Prompt triggered:", prompt:GetFullName(), "by player:", player and player.Name)
 
 	-- If the prompt's parent is a shop, fire the client with the map parent as parameter and the prompt instance
 	local parent = prompt.Parent.Parent
 	if parent and parent:IsA("Model") and parent.Name == "Shop" then
-		print("[ProximityPromptListener] Shop prompt detected. Parent:", parent.Name, "MapParent:", parent.Parent and parent.Parent.Name)
+		--print("[ProximityPromptListener] Shop prompt detected. Parent:", parent.Name, "MapParent:", parent.Parent and parent.Parent.Name)
 		local mapParent = parent.Parent
 		if mapParent then
 			local ReplicatedStorage = game:GetService("ReplicatedStorage")
 			local shopEvent = ReplicatedStorage:FindFirstChild("ShopEvent")
 			if shopEvent then
-				print("[ProximityPromptListener] Firing ShopEvent to client:", player.Name, "with map:", mapParent.Name, "and prompt:", prompt)
+				--print("[ProximityPromptListener] Firing ShopEvent to client:", player.Name, "with map:", mapParent.Name, "and prompt:", prompt)
 				shopEvent:FireClient(player, "Show", prompt, mapParent.Name)
 			else
-				print("[ProximityPromptListener] ShopEvent RemoteEvent not found in ReplicatedStorage!")
+				--print("[ProximityPromptListener] ShopEvent RemoteEvent not found in ReplicatedStorage!")
 			end
 		else
-			print("[ProximityPromptListener] Shop's parent has no mapParent!")
+			--print("[ProximityPromptListener] Shop's parent has no mapParent!")
 		end
 	end
 end

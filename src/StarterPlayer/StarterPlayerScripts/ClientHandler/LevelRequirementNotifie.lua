@@ -40,13 +40,13 @@ end
 
 -- Listen for feedback from server
 itemFeedbackEvent.OnClientEvent:Connect(function(feedbackType, data)
-	print("[LevelRequirementNotifier] Received feedback:", feedbackType, data)
+	--print("[LevelRequirementNotifier] Received feedback:", feedbackType, data)
 	if feedbackType == "LevelRequirementNotMet" then
-		print("[LevelRequirementNotifier] Displaying level requirement notification for:", data.itemName)
+		--print("[LevelRequirementNotifier] Displaying level requirement notification for:", data.itemName)
 		showLevelRequirementNotification(data)
 	end
 end)
 
-print("[LevelRequirementNotifier] Client script loaded and listening for level requirement feedback")
+--print("[LevelRequirementNotifier] Client script loaded and listening for level requirement feedback")
 
 return LevelRequirementNotifier

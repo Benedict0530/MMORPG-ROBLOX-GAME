@@ -154,8 +154,8 @@ local ArmorData = {
         itemType = "armor",
         Price = 14000,
     },
-    ["RedOsmium Armor Shoes"] = {
-        Name = "RedOsmium Armor Shoes",
+    ["Red Osmium Armor Shoes"] = {
+        Name = "Red Osmium Armor Shoes",
         Type = "Shoes",
         Defense = 30,
         Description = "Legendary red osmium armor shoes.",

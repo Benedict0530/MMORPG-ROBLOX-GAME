@@ -44,7 +44,7 @@ local function updatePvpSky()
 			-- Clone and parent the new PvpSky
 			local pvpSkyCopy = pvpSkyTemplate:Clone()
 			pvpSkyCopy.Parent = Lighting
-			print("[PvpSkyHandler] PvpSky applied - entered PVP map: " .. currentMap)
+			--print("[PvpSkyHandler] PvpSky applied - entered PVP map: " .. currentMap)
 		else
 			warn("[PvpSkyHandler] PvpSky not found in ReplicatedStorage")
 		end
@@ -64,7 +64,7 @@ local function updatePvpSky()
 			-- Clone and parent the new DungeonSky
 			local dungeonSkyCopy = dungeonSkyTemplate:Clone()
 			dungeonSkyCopy.Parent = Lighting
-			print("[PvpSkyHandler] DungeonSky applied - entered Dungeon map: " .. currentMap)
+			--print("[PvpSkyHandler] DungeonSky applied - entered Dungeon map: " .. currentMap)
 		else
 			warn("[PvpSkyHandler] DungeonSky not found in ReplicatedStorage")
 		end
@@ -73,12 +73,12 @@ local function updatePvpSky()
 		local existingPvpSky = Lighting:FindFirstChild("PvpSky")
 		if existingPvpSky then
 			existingPvpSky:Destroy()
-			print("[PvpSkyHandler] PvpSky removed - left PVP map")
+			--print("[PvpSkyHandler] PvpSky removed - left PVP map")
 		end
 		local existingDungeonSky = Lighting:FindFirstChild("DungeonSky")
 		if existingDungeonSky then
 			existingDungeonSky:Destroy()
-			print("[PvpSkyHandler] DungeonSky removed - left Dungeon map")
+			--print("[PvpSkyHandler] DungeonSky removed - left Dungeon map")
 		end
 	end
 end

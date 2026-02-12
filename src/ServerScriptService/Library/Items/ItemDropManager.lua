@@ -58,7 +58,7 @@ local function createItemNameBillboard(item, itemName)
 	corner.CornerRadius = UDim.new(0, 8)
 	corner.Parent = textLabel
 	
-	print("[ItemDropManager] ✅ Item name billboard created for", itemName)
+	--print("[ItemDropManager] ✅ Item name billboard created for", itemName)
 end
 
 -- Spawn an item drop at the specified position
@@ -89,6 +89,16 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		local armorsFolder = ServerStorage:FindFirstChild("Armors")
 		if armorsFolder then
 			itemTemplate = armorsFolder:FindFirstChild(itemName)
+			-- Check for subfolders: Suit, Helmet, Legs, Shoes
+			if not itemTemplate then
+				for _, subfolderName in ipairs({"Suit", "Helmet", "Legs", "Shoes"}) do
+					local subfolder = armorsFolder:FindFirstChild(subfolderName)
+					if subfolder then
+						itemTemplate = subfolder:FindFirstChild(itemName)
+						if itemTemplate then break end
+					end
+				end
+			end
 		end
 	end
 
@@ -125,7 +135,7 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		pickupRestrictionValue.Parent = item
 		
 		-- Get party members if owner is in a party
-		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Party"):WaitForChild("PartyDataStore"))
 		local party = PartyDataStore.GetParty(enemyDefeatedByPlayer.UserId)
 		if party and #party.members > 0 then
 			-- Store all party members as allowed owners
@@ -142,9 +152,9 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 					memberValue.Parent = partyOwnersValue
 				end
 			end
-			print("[ItemDropManager] ✅ Drop " .. itemName .. " set for party of " .. enemyDefeatedByPlayer.Name .. " (" .. #party.members .. " members)")
+			--print("[ItemDropManager] ✅ Drop " .. itemName .. " set for party of " .. enemyDefeatedByPlayer.Name .. " (" .. #party.members .. " members)")
 		else
-			print("[ItemDropManager] ℹ️ Drop " .. itemName .. " set for solo player " .. enemyDefeatedByPlayer.Name)
+			--print("[ItemDropManager] ℹ️ Drop " .. itemName .. " set for solo player " .. enemyDefeatedByPlayer.Name)
 		end
 	end
 	
@@ -296,8 +306,8 @@ function ItemDropManager.SpawnItemDrop(itemName, spawnPosition, enemyDefeatedByP
 		createItemNameBillboard(item, itemName)
 	end
 		
-	-- Destroy item after 30 seconds if not collected
-	task.delay(30, function()
+	-- Destroy item after 2 minutes if not collected
+	task.delay(120, function()
 		if item and item.Parent then
 			item:Destroy()
 		end
@@ -377,7 +387,7 @@ function ItemDropManager.SpawnOrbDrop(orbName, spawnPosition, enemyDefeatedByPla
 		pickupRestrictionValue.Parent = orb
 		
 		-- Get party members if owner is in a party
-		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Party"):WaitForChild("PartyDataStore"))
 		local party = PartyDataStore.GetParty(enemyDefeatedByPlayer.UserId)
 		if party and #party.members > 0 then
 			local partyOwnersValue = Instance.new("ObjectValue")
@@ -392,9 +402,9 @@ function ItemDropManager.SpawnOrbDrop(orbName, spawnPosition, enemyDefeatedByPla
 					memberValue.Parent = partyOwnersValue
 				end
 			end
-			print("[ItemDropManager] ✅ Orb drop " .. orbName .. " set for party of " .. enemyDefeatedByPlayer.Name .. " (" .. #party.members .. " members)")
+			--print("[ItemDropManager] ✅ Orb drop " .. orbName .. " set for party of " .. enemyDefeatedByPlayer.Name .. " (" .. #party.members .. " members)")
 		else
-			print("[ItemDropManager] ℹ️ Orb drop " .. orbName .. " set for solo player " .. enemyDefeatedByPlayer.Name)
+			--print("[ItemDropManager] ℹ️ Orb drop " .. orbName .. " set for solo player " .. enemyDefeatedByPlayer.Name)
 		end
 	end
 	
@@ -500,14 +510,14 @@ function ItemDropManager.SpawnOrbDrop(orbName, spawnPosition, enemyDefeatedByPla
 	-- Create orb name billboard
 	createItemNameBillboard(orb, orbName)
 	
-	-- Destroy orb after 30 seconds if not collected
-	task.delay(30, function()
+	-- Destroy orb after 2 minutes if not collected
+	task.delay(120, function()
 		if orb and orb.Parent then
 			orb:Destroy()
 		end
 	end)
 	
-	print("[ItemDropManager] ✅ Orb drop spawned: " .. orbName .. " (id: " .. orbId .. ")")
+	--print("[ItemDropManager] ✅ Orb drop spawned: " .. orbName .. " (id: " .. orbId .. ")")
 	return orb
 end
 

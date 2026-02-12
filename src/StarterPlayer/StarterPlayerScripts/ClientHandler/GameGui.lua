@@ -8,7 +8,6 @@ local WeaponData = require(ReplicatedStorage.Modules.WeaponData)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
 
 -- Disable the default Roblox leaderboard (PlayerList)
@@ -126,7 +125,7 @@ end
 
 local function updateStatsInfoDisplay()
 	if not stats or not gameGuiFrame then return end
-	print("[GameGui] Updating StatsInfo display...")
+	--print("[GameGui] Updating StatsInfo display...")
 	task.wait(0.05)
 	local statsInfo = gameGuiFrame:FindFirstChild("StatsInfo")
 	if not statsInfo then return end
@@ -208,10 +207,9 @@ local function updateStatsInfoDisplay()
 		end
 		local armorDefense = getArmorDef("EquippedHelmet") + getArmorDef("EquippedSuit") + getArmorDef("EquippedLegs") + getArmorDef("EquippedShoes")
 		local defence = defenceStat.Value or 0
-		local defenseOutput = 0
-		if armorDefense > 0 and defence > 0 then
-			defenseOutput = math.floor(math.sqrt(defence * armorDefense) / 1.5)
-		end
+		-- Defense Output = sqrt(Defence + ArmorDefence) - defense works on its own, armor adds to it
+		local totalDefense = defence + armorDefense
+		local defenseOutput = math.floor(math.sqrt(totalDefense))
 		defenseOutputValue.Text = formatNumberWithCommas(defenseOutput)
 	end
 
@@ -237,7 +235,7 @@ local function updateStatsInfoDisplay()
 
 		       -- Calculate and display deterministic damage and crit chance (client-side, for display only)
 		       if damageValue or criticalChanceValue or criticalDamageValue then
-			       -- Find equipped weapon (Tool in character)
+			       -- Find equipped PRIMARY weapon (Tool in character)
 			       local equippedWeaponName = nil
 			       if character then
 				       for _, child in ipairs(character:GetChildren()) do
@@ -247,6 +245,8 @@ local function updateStatsInfoDisplay()
 					       end
 				       end
 			       end
+			       
+			       -- Calculate PRIMARY weapon damage
 			       local weaponStats = equippedWeaponName and WeaponData.GetWeaponStats(equippedWeaponName) or nil
 			       local weaponDamage = weaponStats and weaponStats.damage or 0
 			       local baseAttack = attackStat and attackStat.Value or 1
@@ -255,6 +255,21 @@ local function updateStatsInfoDisplay()
 			       local effectiveAttack = math.floor(baseAttack * attackMult)
 			       -- Damage formula: Weapon Damage × (1 + effectiveAttack/100)
 			       local baseDamage = math.floor(weaponDamage * (1 + (effectiveAttack / 100)))
+			       
+			       -- Check for SECONDARY weapon and calculate its damage
+			       local secondaryBaseDamage = 0
+			       local hasSecondary = false
+			       local secondaryEquipped = stats:FindFirstChild("SecondaryEquipped")
+			       if secondaryEquipped and secondaryEquipped:IsA("Folder") then
+				       local secondaryName = secondaryEquipped:FindFirstChild("name")
+				       if secondaryName and secondaryName.Value ~= "" then
+					       hasSecondary = true
+					       local secondaryWeaponStats = WeaponData.GetWeaponStats(secondaryName.Value)
+					       local secondaryWeaponDamage = secondaryWeaponStats and secondaryWeaponStats.damage or 0
+					       secondaryBaseDamage = math.floor(secondaryWeaponDamage * (1 + (effectiveAttack / 100)))
+				       end
+			       end
+			       
 			       -- Crit chance: (dexterity / 3) * critChanceMult
 			       local critChance = (dexterity / 3) * critChanceMult
 			       if critChance > 100 then critChance = 100 end
@@ -266,8 +281,14 @@ local function updateStatsInfoDisplay()
 			       end
 			       critMult = critMult * critDamageMult
 			       local critDamage = math.floor(baseDamage * critMult)
+			       
+			       -- Display damage (Primary or Primary - Secondary)
 			       if damageValue then
-				       damageValue.Text = formatNumberWithCommas(baseDamage)
+				       if hasSecondary then
+					       damageValue.Text = formatNumberWithCommas(baseDamage) .. " - " .. formatNumberWithCommas(secondaryBaseDamage + baseDamage)
+				       else
+					       damageValue.Text = formatNumberWithCommas(baseDamage)
+				       end
 			       end
 			       if criticalChanceValue then
 				       criticalChanceValue.Text = string.format("%.1f%%", critChance)
@@ -534,7 +555,7 @@ local function setupCharacter(newCharacter)
 	
 	-- Wait for orb to be equipped before first stats display
 	-- This ensures orb multipliers are available when UI first renders
-	print("[GameGui] Waiting for orb to be equipped before first stats display...")
+	--print("[GameGui] Waiting for orb to be equipped before first stats display...")
 	local orbEquipWaitStart = tick()
 	while true do
 		local isOrbEquipped = false
@@ -549,13 +570,13 @@ local function setupCharacter(newCharacter)
 		end)
 		
 		if success and isOrbEquipped then
-			print("[GameGui] ✓ Orb equipped, proceeding with stats display")
+			--print("[GameGui] ✓ Orb equipped, proceeding with stats display")
 			break
 		end
 		
 		-- Timeout after 5 seconds
 		if tick() - orbEquipWaitStart > 5 then
-			print("[GameGui] Timeout waiting for orb (5s), proceeding anyway")
+			--print("[GameGui] Timeout waiting for orb (5s), proceeding anyway")
 			break
 		end
 		
@@ -613,14 +634,14 @@ local function setupCharacter(newCharacter)
 			local idValue = folder:FindFirstChild("id")
 			if nameValue then
 				connections[connKeyPrefix .. "Name"] = nameValue.Changed:Connect(function()
-					print("[GameGui] " .. folderName .. " name changed - updating UI")
+					--print("[GameGui] " .. folderName .. " name changed - updating UI")
 					task.wait(1.2)
 					updateStatsInfoDisplay()
 				end)
 			end
 			if idValue then
 				connections[connKeyPrefix .. "Id"] = idValue.Changed:Connect(function()
-					print("[GameGui] " .. folderName .. " id changed - updating UI")
+					--print("[GameGui] " .. folderName .. " id changed - updating UI")
 					task.wait(1.2)
 					updateStatsInfoDisplay()
 				end)
@@ -630,6 +651,7 @@ local function setupCharacter(newCharacter)
 
 	-- Listen for changes to equipped weapon, orb, and all armor slots
 	connectFolderChanges("Equipped", "equippedWeapon")
+	connectFolderChanges("SecondaryEquipped", "equippedSecondaryWeapon")
 	connectFolderChanges("EquippedOrb", "equippedOrb")
 	connectFolderChanges("EquippedHelmet", "equippedHelmet")
 	connectFolderChanges("EquippedSuit", "equippedSuit")
@@ -645,13 +667,13 @@ local function setupCharacter(newCharacter)
 	local refreshStatsUIEvent = ReplicatedStorage:FindFirstChild("RefreshStatsUI")
 	if refreshStatsUIEvent then
 		connections.refreshStatsUI = refreshStatsUIEvent.OnClientEvent:Connect(function()
-			print("[GameGui] Received RefreshStatsUI signal from server")
+			--print("[GameGui] Received RefreshStatsUI signal from server")
 			updateStatsInfoDisplay()
 		end)
 	end
 	
 	-- Initial update of StatsInfo (with fresh base stats from server)
-	print("[GameGui] Initial update of StatsInfo for player " .. player.Name)
+	--print("[GameGui] Initial update of StatsInfo for player " .. player.Name)
 	updateStatsInfoDisplay()
 	
 	-- Setup Character button to toggle StatsInfo
@@ -715,6 +737,24 @@ local function setupCharacter(newCharacter)
 					   setupStatButton(addDexterity, "Dexterity")
 					
 					if resetStats then
+						-- Update reset button text with reset points count
+						local function updateResetButtonText()
+							local resetPoints = stats:FindFirstChild("ResetPoints")
+							local resetText = resetStats:FindFirstChild("Text")
+							if resetText and resetPoints then
+								resetText.Text = "Reset (" .. tostring(resetPoints.Value) .. ")"
+							end
+						end
+						
+						-- Initial update
+						updateResetButtonText()
+						
+						-- Connect to ResetPoints changes
+						local resetPoints = stats:FindFirstChild("ResetPoints")
+						if resetPoints then
+							connections.resetPointsText = resetPoints.Changed:Connect(updateResetButtonText)
+						end
+						
 						connections.resetStats = resetStats.MouseButton1Click:Connect(function()
 							local resetPoints = stats:FindFirstChild("ResetPoints")
 							if resetPoints and resetPoints.Value <= 0 then
@@ -783,6 +823,103 @@ if character then
 			-- Listen for orb accessory changes
 			updateStatsInfoDisplay()
 		end
+	end)
+end
+
+-- ============ WORLD CHAT LISTENER ============
+-- Configuration for world chat stacking
+local WORLD_CHAT_DURATION = 8
+local WORLD_CHAT_MAX_MESSAGES = 5
+local WORLD_CHAT_BASE_Y = 0.02
+local WORLD_CHAT_STACK_OFFSET = 0.12
+
+-- Function to reposition all world chat messages
+local function repositionWorldChats()
+	if not gameGui then return end
+	local frame = gameGui:FindFirstChild("Frame")
+	if not frame then return end
+	
+	local worldChats = {}
+	for _, child in ipairs(frame:GetChildren()) do
+		if child:IsA("TextLabel") and child.Name:match("^WorldChat") then
+			table.insert(worldChats, child)
+		end
+	end
+	
+	-- Sort by creation time (oldest first)
+	table.sort(worldChats, function(a, b)
+		local aNum = tonumber(a.Name:match("%d+")) or 0
+		local bNum = tonumber(b.Name:match("%d+")) or 0
+		return aNum < bNum
+	end)
+	
+	-- Reposition from bottom to top
+	for index, chat in ipairs(worldChats) do
+		local yPos = WORLD_CHAT_BASE_Y + ((index - 1) * WORLD_CHAT_STACK_OFFSET)
+		chat.Position = UDim2.new(0.3, 0, yPos, 0)
+	end
+end
+
+-- Listen for cross-server admin world chat
+local worldChatEvent = ReplicatedStorage:WaitForChild("WorldChatEvent", 10)
+if worldChatEvent then
+	local worldChatCounter = 0
+	
+	worldChatEvent.OnClientEvent:Connect(function(playerName, message)
+		if not gameGui then return end
+		local frame = gameGui:FindFirstChild("Frame")
+		if not frame then return end
+		
+		-- Count existing world chats
+		local existingChats = {}
+		for _, child in ipairs(frame:GetChildren()) do
+			if child:IsA("TextLabel") and child.Name:match("^WorldChat") then
+				table.insert(existingChats, child)
+			end
+		end
+		
+		-- Remove oldest if we hit max
+		if #existingChats >= WORLD_CHAT_MAX_MESSAGES then
+			table.sort(existingChats, function(a, b)
+				local aNum = tonumber(a.Name:match("%d+")) or 0
+				local bNum = tonumber(b.Name:match("%d+")) or 0
+				return aNum < bNum
+			end)
+			existingChats[1]:Destroy()
+		end
+		
+		-- Create new WorldChat label
+		worldChatCounter = worldChatCounter + 1
+		local worldChat = Instance.new("TextLabel")
+		worldChat.Name = "WorldChat" .. worldChatCounter
+		worldChat.Size = UDim2.new(0.4, 0, 0.1, 0)
+		worldChat.Position = UDim2.new(0.3, 0, WORLD_CHAT_BASE_Y, 0)
+		worldChat.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		worldChat.BackgroundTransparency = 0.3
+		worldChat.BorderSizePixel = 0
+		worldChat.Font = Enum.Font.GothamBold
+		worldChat.TextSize = 20
+		worldChat.TextColor3 = Color3.fromRGB(255, 215, 0)
+		worldChat.TextWrapped = true
+		worldChat.TextXAlignment = Enum.TextXAlignment.Center
+		worldChat.TextYAlignment = Enum.TextYAlignment.Center
+		worldChat.Text = "📢 " .. playerName .. ": " .. message
+		worldChat.Parent = frame
+		
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 12)
+		corner.Parent = worldChat
+		
+		-- Reposition all messages
+		repositionWorldChats()
+		
+		-- Auto-remove after duration
+		task.delay(WORLD_CHAT_DURATION, function()
+			if worldChat and worldChat.Parent then
+				worldChat:Destroy()
+				repositionWorldChats()
+			end
+		end)
 	end)
 end
 

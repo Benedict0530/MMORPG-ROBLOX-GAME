@@ -203,6 +203,18 @@ local portals = {
 		toMap = "Grimleaf Exit",
 		spawnName = "PrevSpawn" -- Adjust as needed for Grimleaf Exit
 	},
+	-- {
+	-- 	fromMap = "Frozen Realm Entrance",
+	-- 	portalPath = {"NextPortal", "HitPart"},
+	-- 	toMap = "Frozen Realm 1",
+	-- 	spawnName = "NextSpawn" -- Adjust as needed for Frozen Realm Entrance
+	-- },
+	{
+		fromMap = "Frozen Realm 1",
+		portalPath = {"PrevPortal", "HitPart"},
+		toMap = "Frozen Realm Entrance",
+		spawnName = "PrevSpawn" -- Adjust as needed for Frozen Realm Entrance
+	},
 	{
 		fromMap = "Grimleaf 1",
 		portalPath = {"PVPPortal", "HitPart"},
@@ -259,12 +271,12 @@ local function connectAllPortalTouched(onTouched)
 		if fromMap then
 			local portalPart = getDescendantByPath(fromMap, portal.portalPath)
 			if portalPart and portalPart:IsA("BasePart") then
-				print("[PortalDebug] Connecting portal:", portal.fromMap, "->", portal.toMap, "| Part:", portalPart:GetFullName())
+				--print("[PortalDebug] Connecting portal:", portal.fromMap, "->", portal.toMap, "| Part:", portalPart:GetFullName())
 				portalTouchedConnections[portalPart] = portalPart.Touched:Connect(function(hit)
 					onTouched(portal, portalPart, hit)
 				end)
 			else
-				print("[PortalDebug] MISSING portal part for:", portal.fromMap, "->", portal.toMap, "| Path:", table.concat(portal.portalPath, "/"))
+				--print("[PortalDebug] MISSING portal part for:", portal.fromMap, "->", portal.toMap, "| Path:", table.concat(portal.portalPath, "/"))
 			end
 		end
 	end
@@ -275,14 +287,14 @@ function PortalHandler.Init()
 				   local character = hit.Parent
 				   local player = Players:GetPlayerFromCharacter(character)
 				   if not player then
-					   print("[PortalTeleportHandler] Not a player character")
+					   --print("[PortalTeleportHandler] Not a player character")
 					   return
 				   end
 
 				   -- Only trigger if player is alive
 				   local humanoid = character:FindFirstChild("Humanoid")
 				   if not humanoid or humanoid.Health <= 0 then
-					   print("[PortalTeleportHandler] Player is dead, ignoring portal trigger for", player.Name)
+					   --print("[PortalTeleportHandler] Player is dead, ignoring portal trigger for", player.Name)
 					   return
 				   end
 
@@ -300,21 +312,21 @@ function PortalHandler.Init()
 
 				   -- Only allow if not already at this portal, or if just came back from the other map
 				   if playerPortalState[userId] == portalKey then
-					   print("[PortalTeleportHandler] Player", player.Name, "already used portal", portalKey, "- ignoring")
+					   --print("[PortalTeleportHandler] Player", player.Name, "already used portal", portalKey, "- ignoring")
 					   portalDebounce[userId][portalPart] = false
 					   return
 				   end
 
 				   if playerPortalState[userId] == prevPortalKey then
-					   print("[PortalTeleportHandler] Player", player.Name, "returned from", portal.toMap, "- allowing portal use again")
+					   --print("[PortalTeleportHandler] Player", player.Name, "returned from", portal.toMap, "- allowing portal use again")
 				   end
 
-				   print("[PortalTeleportHandler] Portal touched by", hit and hit.Parent and hit.Parent.Name)
-				   print("[PortalTeleportHandler] Player detected:", player.Name)
+				   --print("[PortalTeleportHandler] Portal touched by", hit and hit.Parent and hit.Parent.Name)
+				   --print("[PortalTeleportHandler] Player detected:", player.Name)
 
 				   -- If portal name contains 'Dungeon', do not teleport, just fire client to show DungeonUI
 				   if string.find(portal.toMap, "Dungeon") or string.find(portal.fromMap, "Dungeon") then
-					   print("[PortalTeleportHandler] Dungeon portal detected, showing DungeonUI instead of teleporting.")
+					   --print("[PortalTeleportHandler] Dungeon portal detected, showing DungeonUI instead of teleporting.")
 					   -- Fire a dedicated event to show DungeonUI on client, passing toMap as parameter
 					   local ReplicatedStorage = game:GetService("ReplicatedStorage")
 					   local DungeonUIEvent = ReplicatedStorage:FindFirstChild("DungeonUIEvent")
@@ -338,7 +350,7 @@ function PortalHandler.Init()
 						   if spawnPart and spawnPart:IsA("BasePart") then
 							   local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
 							   if humanoidRootPart then
-								   print("[PortalTeleportHandler] Teleporting", player.Name, "to", portal.toMap)
+								   --print("[PortalTeleportHandler] Teleporting", player.Name, "to", portal.toMap)
                                    
 								   -- Fire TeleportGuiEvent to show UI on client immediately
 								   TeleportGuiEvent:FireClient(player, portal.toMap)
@@ -353,26 +365,26 @@ function PortalHandler.Init()
 									   if lastSpawnValue then
 										   lastSpawnValue.Value = portal.spawnName or "SpawnLocation"
 									   end
-									   print("[PortalTeleportHandler] Set PlayerMap=", portal.toMap, ", LastSpawnName=", portal.spawnName or "SpawnLocation")
+									   --print("[PortalTeleportHandler] Set PlayerMap=", portal.toMap, ", LastSpawnName=", portal.spawnName or "SpawnLocation")
 								   -- Save stats with throttle (not forced immediate) to avoid DataStore queue backup
 								   UnifiedDataStoreManager.SaveStats(player, false)
 								   end
 								   -- Set IsPortalTeleporting flag to prevent respawn logic from interfering
 								   player:SetAttribute("IsPortalTeleporting", true)
-								   print("[PortalTeleportHandler] Teleporting to part:", spawnPart.Name, "at position", tostring(spawnPart.Position))
+								   --print("[PortalTeleportHandler] Teleporting to part:", spawnPart.Name, "at position", tostring(spawnPart.Position))
 								   humanoidRootPart.CFrame = spawnPart.CFrame + Vector3.new(0, 3, 0)
 								   playerPortalState[userId] = portalKey
 								   task.delay(10, function()
 									   player:SetAttribute("IsPortalTeleporting", false)
 								   end)
 							   else
-								   print("[PortalTeleportHandler] No HumanoidRootPart found for", player.Name)
+								   --print("[PortalTeleportHandler] No HumanoidRootPart found for", player.Name)
 							   end
 					   else
-						   print("[PortalTeleportHandler] No spawn part found in", portal.toMap)
+						   --print("[PortalTeleportHandler] No spawn part found in", portal.toMap)
 					   end
 				   else
-					   print("[PortalTeleportHandler] No toMap found:", portal.toMap)
+					   --print("[PortalTeleportHandler] No toMap found:", portal.toMap)
 				   end
 
 				   task.delay(2, function()
@@ -388,17 +400,17 @@ function PortalHandler.Init()
 	local mapFolder = Workspace:FindFirstChild("Maps")
 	if mapFolder then
 		mapFolder.ChildAdded:Connect(function()
-			print("[PortalTeleportHandler] Map added, reconnecting portal events...")
+			--print("[PortalTeleportHandler] Map added, reconnecting portal events...")
 			connectAllPortalTouched(onPortalTouched)
 		end)
 		mapFolder.ChildRemoved:Connect(function()
-			print("[PortalTeleportHandler] Map removed, reconnecting portal events...")
+			--print("[PortalTeleportHandler] Map removed, reconnecting portal events...")
 			connectAllPortalTouched(onPortalTouched)
 		end)
 	end
 
-	-- Listen for PlayerMap stat changes to reset portal state when player returns to previous map
-	Players.PlayerAdded:Connect(function(player)
+	-- Export SetupPlayer function for Init.server.lua to call
+	function PortalHandler.SetupPlayer(player)
 		-- Always start with a fresh debounce table for this player
 		portalDebounce[player.UserId] = {}
 		-- On first Stats folder creation, reset anti-tp grace period (for first spawn/teleport)
@@ -435,7 +447,9 @@ function PortalHandler.Init()
 				end
 			end
 		end)
-	end)
+	end
+	
+	-- PlayerAdded handler moved to Init.server.lua for centralized initialization
 end
 
 return PortalHandler

@@ -15,6 +15,7 @@ end
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local CameraFocusModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CameraFocusModule"))
 
 
 local player = Players.LocalPlayer
@@ -75,6 +76,10 @@ local function setupDeathHideShopUI(character)
     if humanoid then
         humanoid.Died:Connect(function()
             shopSelectionFrame.Visible = false
+            ShopUI.Visible = false
+            SellUI.Visible = false
+            CameraFocusModule.RestoreDefault()
+            currentShopNpc = nil
         end)
     end
 end
@@ -82,7 +87,10 @@ end
 if player.Character then
     setupDeathHideShopUI(player.Character)
 end
-player.CharacterAdded:Connect(setupDeathHideShopUI)
+player.CharacterAdded:Connect(function(newCharacter)
+    setupDeathHideShopUI(newCharacter)
+    CameraFocusModule.HandleCharacterRespawn(newCharacter)
+end)
 
 -- Call this function to buy an item
 function ShopHandler.BuyItem(itemName)
@@ -147,6 +155,14 @@ local function getEquippedItemIds()
         local equippedFolder = statsFolder:FindFirstChild("Equipped")
         if equippedFolder and equippedFolder:IsA("Folder") then
             local idValue = equippedFolder:FindFirstChild("id")
+            if idValue and idValue:IsA("StringValue") then
+                equippedIds[idValue.Value] = true
+            end
+        end
+        -- Secondary Weapon
+        local secondaryEquippedFolder = statsFolder:FindFirstChild("SecondaryEquipped")
+        if secondaryEquippedFolder and secondaryEquippedFolder:IsA("Folder") then
+            local idValue = secondaryEquippedFolder:FindFirstChild("id")
             if idValue and idValue:IsA("StringValue") then
                 equippedIds[idValue.Value] = true
             end
@@ -528,7 +544,7 @@ local function createShopItem(itemName, index)
                     purchaseButtonConn:Disconnect()
                 end
                 purchaseButtonConn = purchaseButton.MouseButton1Click:Connect(function()
-                    print("[ShopUI] PurchaseButton clicked for", itemName)
+                    --print("[ShopUI] PurchaseButton clicked for", itemName)
                     shopEvent:FireServer("Buy", itemName)
                     shopItemStats.Visible = false
                 end)
@@ -564,7 +580,7 @@ end
 
 -- Only show ShopUI on BuyButton click
 shopBuy.MouseButton1Click:Connect(function()
-    print("Buy button clicked, showing shop UI")
+    --print("Buy button clicked, showing shop UI")
     shopUITitle.Text = ShopHandler._lastMapName.." Shop"
     ShopUI.Visible = true
     shopSelectionFrame.Visible = false
@@ -576,7 +592,7 @@ end)
 
 
 shopSell.MouseButton1Click:Connect(function()
-    print("Sell button clicked, showing sell UI")
+    --print("Sell button clicked, showing sell UI")
     shopSellTitle.Text = "Sell Items"
     SellUI.Visible = true
     shopSelectionFrame.Visible = false
@@ -610,21 +626,33 @@ end)
 
 -- Track the last prompt for re-enabling
 local lastShopPrompt = nil
+local currentShopNpc = nil -- Store the shop NPC for camera focus
 
 
 shopEvent.OnClientEvent:Connect(function(command, prompt, mapName)
     if command == "Show" then
-        print("[ShopHandler] Shop prompt triggered for map/shop:", mapName)
+        --print("[ShopHandler] Shop prompt triggered for map/shop:", mapName)
         shopSelectionFrame.Visible = true
         ShopHandler._lastMapName = mapName
         if prompt and prompt:IsA("ProximityPrompt") then
             prompt.Enabled = false
             lastShopPrompt = prompt
+            -- Get the shop NPC for camera focus (prompt.Parent is npc, prompt.Parent.Parent is Shop)
+            local shopModel = prompt.Parent and prompt.Parent.Parent
+            if shopModel and shopModel:IsA("Model") then
+                local npc = shopModel:FindFirstChild("npc")
+                if npc then
+                    currentShopNpc = npc
+                    CameraFocusModule.FocusOn(npc, 1.5)
+                end
+            end
         end
     elseif command == "Hide" then
-        print("[ShopHandler] Hiding shop UI")
+        --print("[ShopHandler] Hiding shop UI")
         shopSelectionFrame.Visible = false
         ShopUI.Visible = false
+        CameraFocusModule.RestoreDefault()
+        currentShopNpc = nil
         if lastShopPrompt and lastShopPrompt:IsA("ProximityPrompt") then
             lastShopPrompt.Enabled = true
             lastShopPrompt = nil
@@ -637,6 +665,8 @@ end)
 closeShopButton.MouseButton1Click:Connect(function()
     ShopUI.Visible = false
     shopSelectionFrame.Visible = false
+    CameraFocusModule.RestoreDefault()
+    currentShopNpc = nil
     if lastShopPrompt and lastShopPrompt:IsA("ProximityPrompt") then
         lastShopPrompt.Enabled = true
         lastShopPrompt = nil
@@ -647,6 +677,8 @@ end)
 closeSellButton.MouseButton1Click:Connect(function()
     SellUI.Visible = false
     shopSelectionFrame.Visible = false
+    CameraFocusModule.RestoreDefault()
+    currentShopNpc = nil
     if lastShopPrompt and lastShopPrompt:IsA("ProximityPrompt") then
         lastShopPrompt.Enabled = true
         lastShopPrompt = nil

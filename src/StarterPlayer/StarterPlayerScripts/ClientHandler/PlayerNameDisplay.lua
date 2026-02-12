@@ -19,7 +19,7 @@ local NAME_DISPLAY_CONFIG = {
 -- Track created billboards to avoid duplicates
 local createdBillboards = {}
 
-print("[PlayerNameDisplay.client] Client script started")
+--print("[PlayerNameDisplay.client] Client script started")
 
 -- Function to format numbers with commas (e.g., 1000 -> "1,000")
 local function FormatNumberWithCommas(num)
@@ -46,17 +46,17 @@ end
 
 -- Function to create name display for a player character
 local function CreateNameDisplay(player, character)
-	print("[PlayerNameDisplay.client] CreateNameDisplay called for:", player.Name)
+	--print("[PlayerNameDisplay.client] CreateNameDisplay called for:", player.Name)
 	
 	if not character or not player then 
-		print("[PlayerNameDisplay.client] Invalid character or player")
+		--print("[PlayerNameDisplay.client] Invalid character or player")
 		return 
 	end
 	
 	-- Wait longer for HumanoidRootPart to exist (can take time for remote players)
 	local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
 	if not humanoidRootPart then 
-		print("[PlayerNameDisplay.client] No HumanoidRootPart for:", player.Name, "- will retry")
+		--print("[PlayerNameDisplay.client] No HumanoidRootPart for:", player.Name, "- will retry")
 		-- Retry after a delay
 		task.wait(2)
 		if character and character.Parent then
@@ -69,7 +69,7 @@ local function CreateNameDisplay(player, character)
 	local existingBillboard = humanoidRootPart:FindFirstChild("NameBillboard")
 	if existingBillboard then
 		existingBillboard:Destroy()
-		print("[PlayerNameDisplay.client] Removed old billboard for:", player.Name)
+		--print("[PlayerNameDisplay.client] Removed old billboard for:", player.Name)
 	end
 	
 	-- Get the template
@@ -87,7 +87,7 @@ local function CreateNameDisplay(player, character)
 	billboard.StudsOffset = NAME_DISPLAY_CONFIG.offset
 	billboard.Parent = humanoidRootPart
 	
-	print("[PlayerNameDisplay.client] Created billboard for:", player.Name)
+	--print("[PlayerNameDisplay.client] Created billboard for:", player.Name)
 	
 	-- Clone the template frame into the billboard
 	local frameClone = template:Clone()
@@ -157,7 +157,7 @@ local function CreateNameDisplay(player, character)
 	else
 		textLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- White color for normal players
 	end
-	print("[PlayerNameDisplay.client] Set text:", displayText)
+	--print("[PlayerNameDisplay.client] Set text:", displayText)
 	
 	-- Update name display if level changes
 	if NAME_DISPLAY_CONFIG.showLevel then
@@ -208,45 +208,45 @@ local function CreateNameDisplay(player, character)
 		end
 	end
 	
-	print("[PlayerNameDisplay.client] ✓ Created custom name display for:", player.Name)
+	--print("[PlayerNameDisplay.client] ✓ Created custom name display for:", player.Name)
 	createdBillboards[player.UserId] = billboard
 	return billboard
 end
 
 -- Setup a player
 local function SetupPlayer(player)
-	print("[PlayerNameDisplay.client] SetupPlayer called for:", player.Name)
+	--print("[PlayerNameDisplay.client] SetupPlayer called for:", player.Name)
 	
 	-- Always connect to CharacterAdded first
 	player.CharacterAdded:Connect(function(character)
-		print("[PlayerNameDisplay.client] Character loaded for:", player.Name)
+		--print("[PlayerNameDisplay.client] Character loaded for:", player.Name)
 		task.wait(0.3)
 		CreateNameDisplay(player, character)
 	end)
 	
 	-- If character already exists, set it up immediately
 	if player.Character then
-		print("[PlayerNameDisplay.client] Character already exists for:", player.Name)
+		--print("[PlayerNameDisplay.client] Character already exists for:", player.Name)
 		task.wait(0.3)
 		CreateNameDisplay(player, player.Character)
 	else
-		print("[PlayerNameDisplay.client] Waiting for character for:", player.Name)
+		--print("[PlayerNameDisplay.client] Waiting for character for:", player.Name)
 	end
 end
 
 -- Initialize
 local function Initialize()
-	print("[PlayerNameDisplay.client] Initializing...")
+	--print("[PlayerNameDisplay.client] Initializing...")
 	
 	-- Setup all players (including self)
 	for _, player in ipairs(Players:GetPlayers()) do
-		print("[PlayerNameDisplay.client] Setting up existing player:", player.Name)
+		--print("[PlayerNameDisplay.client] Setting up existing player:", player.Name)
 		SetupPlayer(player)
 	end
 	
 	-- Setup new players
 	Players.PlayerAdded:Connect(function(player)
-		print("[PlayerNameDisplay.client] New player joined:", player.Name)
+		--print("[PlayerNameDisplay.client] New player joined:", player.Name)
 		task.wait(0.5)
 		SetupPlayer(player)
 	end)
@@ -256,11 +256,11 @@ local function Initialize()
 		if createdBillboards[player.UserId] then
 			createdBillboards[player.UserId]:Destroy()
 			createdBillboards[player.UserId] = nil
-			print("[PlayerNameDisplay.client] Cleaned up display for:", player.Name)
+			--print("[PlayerNameDisplay.client] Cleaned up display for:", player.Name)
 		end
 	end)
 	
-	print("[PlayerNameDisplay.client] ✓ Initialized custom player name displays")
+	--print("[PlayerNameDisplay.client] ✓ Initialized custom player name displays")
 	
 	-- Refresh nearby players' name displays every 5 seconds
 	-- This ensures players who weren't visible initially get their name tags
@@ -275,7 +275,7 @@ local function Initialize()
 					
 					-- If player has no name billboard, create one
 					if humanoidRootPart and not humanoidRootPart:FindFirstChild("NameBillboard") then
-						print("[PlayerNameDisplay.client] 🔄 Refreshing name display for:", player.Name)
+						--print("[PlayerNameDisplay.client] 🔄 Refreshing name display for:", player.Name)
 						CreateNameDisplay(player, player.Character)
 					end
 				end

@@ -2,14 +2,17 @@
 -- Handles player-vs-player damage detection and application
 
 
-print("[PVPHandler][DEBUG] Module loaded (very top, before requires)")
+--print("[PVPHandler][DEBUG] Module loaded (very top, before requires)")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local DamageManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("DamageManager"))
 local SoundModule = require(ReplicatedStorage.Modules.SoundModule)
-local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Party"):WaitForChild("PartyDataStore"))
+local DungeonsData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DungeonsData"))
+local DuelHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("DuelHandler"))
+local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
 
 -- Create RemoteEvent for showing player damage text on clients
 local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
@@ -20,7 +23,7 @@ if not damageEvent then
 end
 
 local PVPHandler = {}
-print("[PVPHandler][DEBUG] Module loaded")
+--print("[PVPHandler][DEBUG] Module loaded")
 
 -- Track consecutive hits on players (stores hit count and last hit time)
 local consecutiveHits = {}
@@ -105,7 +108,7 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 		if targetPlayer ~= attacker and targetPlayer.Character then
 			-- Prevent damage to NPCs - check IsNPC attribute
 			if targetPlayer.Character:GetAttribute("IsNPC") then
-				print("[PVPHandler][DEBUG] Target is an NPC (IsNPC attribute), blocking damage")
+				--print("[PVPHandler][DEBUG] Target is an NPC (IsNPC attribute), blocking damage")
 				continue
 			end
 			
@@ -113,32 +116,80 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 			-- Check distance, directional cone, AND raycast line-of-sight
 			if targetRoot and (targetRoot.Position - attackerPos).Magnitude <= radius and isTargetInAttackCone(charRoot, targetRoot) and raycastHitsTarget(charRoot, targetRoot, radius) then
 				local skip = false
+				
+				-- Check if attacker or target is in SafeZone - block PVP damage
+				if attacker:GetAttribute("SafeZone") == true then
+					--print("[PVPHandler][DEBUG] Attacker is in SafeZone, blocking PVP damage")
+					skip = true
+				end
+				
+				if targetPlayer:GetAttribute("SafeZone") == true then
+					--print("[PVPHandler][DEBUG] Target is in SafeZone, blocking PVP damage")
+					skip = true
+				end
+				
 				-- Check if already hit
 				if hitEnemies[targetPlayer] then
-					print("[PVPHandler][DEBUG][Proximity] Already hit this player in this attack.")
+					--print("[PVPHandler][DEBUG][Proximity] Already hit this player in this attack.")
 					skip = true
 				end
 
 				local attackerStats = attacker:FindFirstChild("Stats")
 				local targetStats = targetPlayer:FindFirstChild("Stats")
-				print("[PVPHandler][DEBUG][Proximity] attackerStats:", attackerStats)
-				print("[PVPHandler][DEBUG][Proximity] targetStats:", targetStats)
+				--print("[PVPHandler][DEBUG][Proximity] attackerStats:", attackerStats)
+				--print("[PVPHandler][DEBUG][Proximity] targetStats:", targetStats)
 				if not (attackerStats and targetStats) then
-					print("[PVPHandler][DEBUG][Proximity] One or both player stats missing.")
+					--print("[PVPHandler][DEBUG][Proximity] One or both player stats missing.")
 					skip = true
 				end
 
 				local attackerMap = attackerStats and attackerStats:FindFirstChild("PlayerMap")
 				local targetMap = targetStats and targetStats:FindFirstChild("PlayerMap")
-				print("[PVPHandler][DEBUG][Proximity] attackerMap:", attackerMap and attackerMap.Value)
-				print("[PVPHandler][DEBUG][Proximity] targetMap:", targetMap and targetMap.Value)
+				--print("[PVPHandler][DEBUG][Proximity] attackerMap:", attackerMap and attackerMap.Value)
+				--print("[PVPHandler][DEBUG][Proximity] targetMap:", targetMap and targetMap.Value)
 				if not (attackerMap and targetMap) then
-					print("[PVPHandler][DEBUG][Proximity] One or both player map info missing.")
+					--print("[PVPHandler][DEBUG][Proximity] One or both player map info missing.")
 					skip = true
 				end
-				if attackerMap and targetMap and (attackerMap.Value ~= "PVP Area" or targetMap.Value ~= "PVP Area") then
-					print("[PVPHandler][DEBUG][Proximity] One or both players not in PVP Area.")
-					skip = true
+				
+				-- Check if players are dueling each other
+				local arePlayersDueling = DuelHandler.ArePlayersDueling(attacker.UserId, targetPlayer.UserId)
+				local attackerInDuel = DuelHandler.GetDuelOpponent(attacker.UserId) ~= nil
+				local targetInDuel = DuelHandler.GetDuelOpponent(targetPlayer.UserId) ~= nil
+				
+				   if arePlayersDueling then
+					   -- Block damage between duelists until countdown ends
+					   if DuelHandler.IsDuelDamageLocked(attacker.UserId) or DuelHandler.IsDuelDamageLocked(targetPlayer.UserId) then
+						   --print("[PVPHandler][DEBUG][Proximity] Duel countdown active, blocking damage between duelists")
+						   skip = true
+					   end
+					   -- Otherwise, allow damage
+				else
+					-- Not dueling each other - check duel protection
+					if attackerInDuel then
+						-- Attacker is in a duel with someone else, block damage to non-opponent
+						--print("[PVPHandler][DEBUG][Proximity] Attacker is in a duel with someone else, blocking damage")
+						skip = true
+					end
+					
+					if targetInDuel then
+						-- Target is in a duel with someone else, block damage from non-opponent
+						--print("[PVPHandler][DEBUG][Proximity] Target is in a duel with someone else, blocking damage")
+						skip = true
+					end
+					
+					-- If not in a duel, check normal PVP map restrictions
+					if not skip then
+						local function isPVPAllowed(mapName)
+							if mapName == "PVP Area" then return true end
+							local data = DungeonsData[mapName]
+							return data and data.AllowPVP == true
+						end
+						if attackerMap and targetMap and (not isPVPAllowed(attackerMap.Value) or not isPVPAllowed(targetMap.Value)) then
+							--print("[PVPHandler][DEBUG][Proximity] One or both players not in a PVP-enabled map.")
+							skip = true
+						end
+					end
 				end
 
 				if not skip then
@@ -146,20 +197,20 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 					hitEnemies[targetPlayer] = true
 				-- Check if target player is still initializing - skip damage during spawn
 				if DamageManager.IsPlayerInitializing(targetPlayer) then
-					print("[PVPHandler][DEBUG][Proximity] Target player " .. targetPlayer.Name .. " is still initializing, blocking damage")
+					--print("[PVPHandler][DEBUG][Proximity] Target player " .. targetPlayer.Name .. " is still initializing, blocking damage")
 					skip = true
 				end
 				
 				-- Check if target has equipped weapon
 				local equippedFolder = targetStats:FindFirstChild("Equipped")
 				if not equippedFolder or not equippedFolder:IsA("Folder") then
-					print("[PVPHandler][DEBUG][Proximity] Target player has no Equipped folder, blocking damage")
+					--print("[PVPHandler][DEBUG][Proximity] Target player has no Equipped folder, blocking damage")
 					skip = true
 				end
 				
 				local equippedId = equippedFolder and equippedFolder:FindFirstChild("id")
 				if not equippedId or equippedId.Value == "" then
-					print("[PVPHandler][DEBUG][Proximity] Target player has no equipped weapon ID, blocking damage")
+					--print("[PVPHandler][DEBUG][Proximity] Target player has no equipped weapon ID, blocking damage")
 					skip = true
 				end
 				
@@ -177,11 +228,11 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 						end
 						
 						if not hasEquippedTool then
-							print("[PVPHandler][DEBUG][Proximity] Target player has no equipped tool in character, blocking damage")
+							--print("[PVPHandler][DEBUG][Proximity] Target player has no equipped tool in character, blocking damage")
 							skip = true
 						end
 					else
-						print("[PVPHandler][DEBUG][Proximity] Target player has no weapon name value, blocking damage")
+						--print("[PVPHandler][DEBUG][Proximity] Target player has no weapon name value, blocking damage")
 						skip = true
 					end
 				end
@@ -192,13 +243,20 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 					return
 				end
 				
-				-- Check if both players are in the same party
-				local attackerPartyId = PartyDataStore.GetPartyId(attacker.UserId)
-				local targetPartyId = PartyDataStore.GetPartyId(targetPlayer.UserId)
-				if attackerPartyId and targetPartyId and attackerPartyId == targetPartyId then
-					print("[PVPHandler][DEBUG][Proximity] Target player is in the same party as attacker, blocking damage")
-					hitEnemies[targetPlayer] = nil
-					return
+				-- Check if players are dueling each other - if so, allow damage even if in same party
+				local arePlayersDueling = DuelHandler.ArePlayersDueling(attacker.UserId, targetPlayer.UserId)
+				
+				-- Check if both players are in the same party (but skip if they're dueling)
+				if not arePlayersDueling then
+					local attackerPartyId = PartyDataStore.GetPartyId(attacker.UserId)
+					local targetPartyId = PartyDataStore.GetPartyId(targetPlayer.UserId)
+					if attackerPartyId and targetPartyId and attackerPartyId == targetPartyId then
+						--print("[PVPHandler][DEBUG][Proximity] Target player is in the same party as attacker, blocking damage")
+						hitEnemies[targetPlayer] = nil
+						return
+					end
+				else
+					--print("[PVPHandler][DEBUG][Proximity] Players are dueling - allowing damage despite party membership")
 				end
 				
 					-- Calculate outgoing damage from attacker
@@ -207,13 +265,13 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 					-- Apply target's defense reduction to get actual damage dealt
 					local actualDamage = DamageManager.CalculateIncomingDamage(outgoingDamage, targetPlayer)
 					
-					print("[PVPHandler][DEBUG][Proximity] Outgoing damage:", outgoingDamage, "After defense:", actualDamage, "isCritical:", isCritical)
+					--print("[PVPHandler][DEBUG][Proximity] Outgoing damage:", outgoingDamage, "After defense:", actualDamage, "isCritical:", isCritical)
 					local currentHealth = targetStats:FindFirstChild("CurrentHealth")
-					print("[PVPHandler][DEBUG][Proximity] currentHealth before:", currentHealth and currentHealth.Value)
+					--print("[PVPHandler][DEBUG][Proximity] currentHealth before:", currentHealth and currentHealth.Value)
 
 					if currentHealth then
 						currentHealth.Value = math.max(0, currentHealth.Value - actualDamage)
-						print("[PVPHandler][DEBUG][Proximity] currentHealth after:", currentHealth.Value)
+						--print("[PVPHandler][DEBUG][Proximity] currentHealth after:", currentHealth.Value)
 
 						-- Save immediately to DataStore for PVP
 						local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
@@ -222,21 +280,24 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 						-- Handle death
 						if currentHealth.Value <= 0 then
 							local humanoid = targetPlayer.Character and targetPlayer.Character:FindFirstChild("Humanoid")
-							print("[PVPHandler][DEBUG][Proximity] Player died, humanoid:", humanoid)
+							--print("[PVPHandler][DEBUG][Proximity] Player died, humanoid:", humanoid)
 							if humanoid then
 								humanoid:TakeDamage(9999)
 								DamageManager.MarkPlayerInitializing(targetPlayer)
 							end
 						end
 					else
-						print("[PVPHandler][DEBUG][Proximity] currentHealth stat missing!")
+						--print("[PVPHandler][DEBUG][Proximity] currentHealth stat missing!")
 					end
 
 					-- Fire sound and damage event
 					SoundModule.playSoundByName("Hit", "SFX", false, 1)
 					damageEvent:FireAllClients(targetPlayer.Character, actualDamage, isCritical, false)
 
-					-- Track consecutive hits and apply effects
+				-- Track consecutive hits and apply effects (skip if players are dueling)
+				local arePlayersDueling = DuelHandler.ArePlayersDueling(attacker.UserId, targetPlayer.UserId)
+				
+				if not arePlayersDueling then
 					local hitCount = getAndUpdateHitCount(targetPlayer.UserId)
 					
 					if hitCount == 2 then
@@ -246,13 +307,13 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 							-- Calculate knockback direction (away from attacker)
 							local knockbackDirection = (targetRoot.Position - charRoot.Position).Unit
 							KnockbackEvent:FireClient(targetPlayer, knockbackDirection, 100) -- 50 is knockback force
-							print("[PVPHandler] Triggered knockback and ragdoll on " .. targetPlayer.Name .. " (hit count: " .. hitCount .. ")")
+							--print("[PVPHandler] Triggered knockback and ragdoll on " .. targetPlayer.Name .. " (hit count: " .. hitCount .. ")")
 							
 							-- Reset hit counter asynchronously after ragdoll effect (non-blocking)
 							task.spawn(function()
 								task.wait(1.5)
 								consecutiveHits[targetPlayer.UserId] = {count = 0, lastHitTime = 0}
-								print("[PVPHandler] Reset hit counter for " .. targetPlayer.Name .. " after ragdoll")
+								--print("[PVPHandler] Reset hit counter for " .. targetPlayer.Name .. " after ragdoll")
 							end)
 						end
 					else
@@ -260,20 +321,22 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 						local ParalysisEvent = ReplicatedStorage:FindFirstChild("ParalysisEvent")
 						if ParalysisEvent then
 							ParalysisEvent:FireClient(targetPlayer, 1)
-							print("[PVPHandler] Triggered paralysis effect on " .. targetPlayer.Name .. " (hit count: " .. hitCount .. ")")
+							--print("[PVPHandler] Triggered paralysis effect on " .. targetPlayer.Name .. " (hit count: " .. hitCount .. ")")
 							
 							-- Reset hit counter asynchronously after paralysis effect (non-blocking)
 							task.spawn(function()
 								task.wait(1.2)
 								consecutiveHits[targetPlayer.UserId] = {count = 0, lastHitTime = 0}
-								print("[PVPHandler] Reset hit counter for " .. targetPlayer.Name .. " after paralysis")
+								--print("[PVPHandler] Reset hit counter for " .. targetPlayer.Name .. " after paralysis")
 							end)
 						end
 					end
+				else
+					--print("[PVPHandler] Players are dueling - skipping paralysis/knockback effects")
+				end
 
-					-- Apply spirit orb highlight effect if attacker has spirit orb equipped
-					local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
-					if OrbSpiritHandler.HasSpiritOrb(attacker) then
+				-- Apply spirit orb highlight effect if attacker has spirit orb equipped
+				if OrbSpiritHandler.HasSpiritOrb(attacker) then
 						local orbName = OrbSpiritHandler.GetEquippedOrbName(attacker)
 						if orbName and orbName ~= "" then
 							-- Get orb colors table and highlight function from WeaponManager
@@ -316,7 +379,7 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 						end
 					end
 
-					print("[PVPHandler][Proximity] " .. attacker.Name .. " hit player '" .. targetPlayer.Name .. "' for " .. tostring(actualDamage) .. " damage (crit: " .. tostring(isCritical) .. ")")
+					--print("[PVPHandler][Proximity] " .. attacker.Name .. " hit player '" .. targetPlayer.Name .. "' for " .. tostring(actualDamage) .. " damage (crit: " .. tostring(isCritical) .. ")")
 				end
 			end
 		end
@@ -396,7 +459,8 @@ for _, map in ipairs(mapList) do
 							break
 						end
 						if currentHealth and maxHealth and currentHealth.Value > 0 then
-							local damage = math.floor(maxHealth.Value * 0.05)
+							-- Calculate 5% of max health, but ensure at least 1 damage
+							local damage = math.max(1, math.floor(maxHealth.Value * 0.05))
 							local oldHealth = currentHealth.Value
 							currentHealth.Value = math.max(0, currentHealth.Value - damage)
 							-- Fire damage text event for UI

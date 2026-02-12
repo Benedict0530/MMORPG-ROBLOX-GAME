@@ -69,13 +69,13 @@ local function handleItemDropCollection(player, itemDrop)
 		return false
 	end
 	
-	print("[ItemCollectionHandler] Player " .. player.Name .. " collecting item: " .. itemName)
+	--print("[ItemCollectionHandler] Player " .. player.Name .. " collecting item: " .. itemName)
 	
 	-- Get item type from the drop if available, otherwise pass nil to let InventoryManager infer it
 	local itemTypeObj = itemDrop:FindFirstChild("ItemType")
 	local itemType = itemTypeObj and itemTypeObj.Value
 
-	print("[ItemCollectionHandler] Item type from drop: " .. tostring(itemType))
+	--print("[ItemCollectionHandler] Item type from drop: " .. tostring(itemType))
 
 	-- Only allow valid item types to be passed to AddItem
 	local validTypes = { ["armor"] = true, ["weapon"] = true, ["spirit orb"] = true, ["questItem"] = true }
@@ -91,13 +91,13 @@ local function handleItemDropCollection(player, itemDrop)
 		local orbIdObj = itemDrop:FindFirstChild("OrbId")
 		local orbId = orbIdObj and orbIdObj.Value
 
-		print("[ItemCollectionHandler] Adding spirit orb to inventory: " .. orbName .. " (id: " .. tostring(orbId) .. ")")
+		--print("[ItemCollectionHandler] Adding spirit orb to inventory: " .. orbName .. " (id: " .. tostring(orbId) .. ")")
 
 		-- Add orb to player's inventory with "spirit orb" itemType
 		local success, errorOrId = InventoryManager.AddItem(player, orbName, "spirit orb")
 
 		if success then
-			print("[ItemCollectionHandler] Successfully added spirit orb " .. orbName .. " to " .. player.Name .. "'s inventory (itemId: " .. errorOrId .. ")")
+			--print("[ItemCollectionHandler] Successfully added spirit orb " .. orbName .. " to " .. player.Name .. "'s inventory (itemId: " .. errorOrId .. ")")
 			SFXEvent:FireClient(player, "ItemPickup")
 			return true
 		else
@@ -120,7 +120,7 @@ local function handleItemDropCollection(player, itemDrop)
 	local success, errorOrId = InventoryManager.AddItem(player, itemName, safeItemType)
 	
 	if success then
-		print("[ItemCollectionHandler] Successfully added " .. itemName .. " to " .. player.Name .. "'s inventory")
+		--print("[ItemCollectionHandler] Successfully added " .. itemName .. " to " .. player.Name .. "'s inventory")
 		SFXEvent:FireClient(player, "ItemPickup")
 		return true
 	else
@@ -165,13 +165,13 @@ local function canPlayerPickupItem(player, item)
 	
 	-- Check if player is in the same party as the owner
 	if ownerValue and ownerValue.Parent then
-		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+		local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Party"):WaitForChild("PartyDataStore"))
 		local playerParty = PartyDataStore.GetParty(player.UserId)
 		local ownerParty = PartyDataStore.GetParty(ownerValue.UserId)
 		
 		-- If both are in the same party, allow pickup
 		if playerParty and ownerParty and playerParty.leader == ownerParty.leader then
-			print("[ItemCollectionHandler] ✅ " .. player.Name .. " can pick up party-owned drop (party leader: " .. playerParty.leader.Name .. ")")
+			--print("[ItemCollectionHandler] ✅ " .. player.Name .. " can pick up party-owned drop (party leader: " .. playerParty.leader.Name .. ")")
 			return true
 		end
 	end

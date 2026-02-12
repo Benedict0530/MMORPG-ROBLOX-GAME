@@ -1,6 +1,6 @@
 -- UnifiedDataStoreManager.lua
--- Centralized DataStore manager for all player data (Stats, Level, Experience, Money, Weapons)
--- Handles throttling, queuing, and safe concurrent modifications
+
+local UnifiedDataStoreManager = {}
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -10,6 +10,7 @@ local statsStore = DataStoreService:GetDataStore("PlayerStats")
 local weaponDataStore = DataStoreService:GetDataStore("WeaponData")
 local orbDataStore = DataStoreService:GetDataStore("OrbData")
 local inventoryStore = DataStoreService:GetDataStore("PlayerInventory")
+local dungeonTimerStore = DataStoreService:GetDataStore("DungeonTimers")
 
 -- Configuration
 local SAVE_THROTTLE_INTERVAL = 0 -- Save at most every 1 second per player
@@ -29,6 +30,55 @@ local playerStatsCache = {}
 local inventoryCache = {}
 local weaponDataCache = {}
 local orbDataCache = {}
+local dungeonTimerCache = {} -- [userId] = {toMap, endTime}
+-- ===== DUNGEON TIMER FUNCTIONS =====
+function UnifiedDataStoreManager.SaveDungeonTimer(userId, toMap, endTime, forceImmediate)
+	if not userId or not toMap or not endTime then return false end
+	-- Save to cache
+	dungeonTimerCache[userId] = {toMap = toMap, endTime = endTime}
+	-- Save to DataStore
+	local success, err = pcall(function()
+		dungeonTimerStore:SetAsync("Player_" .. userId, {toMap = toMap, endTime = endTime})
+	end)
+	if not success then
+		warn("[UnifiedDataStoreManager] Failed to save dungeon timer for user " .. userId .. ": " .. tostring(err))
+		return false
+	end
+	return true
+end
+
+function UnifiedDataStoreManager.LoadDungeonTimer(userId)
+	if not userId then return nil end
+	-- Check cache first
+	if dungeonTimerCache[userId] then
+		return dungeonTimerCache[userId]
+	end
+	local data
+	local success, err = pcall(function()
+		data = dungeonTimerStore:GetAsync("Player_" .. userId)
+	end)
+	if not success then
+		warn("[UnifiedDataStoreManager] Failed to load dungeon timer for user " .. userId .. ": " .. tostring(err))
+		return nil
+	end
+	if data then
+		dungeonTimerCache[userId] = data
+	end
+	return data
+end
+
+function UnifiedDataStoreManager.ClearDungeonTimer(userId)
+	if not userId then return false end
+	dungeonTimerCache[userId] = nil
+	local success, err = pcall(function()
+		dungeonTimerStore:RemoveAsync("Player_" .. userId)
+	end)
+	if not success then
+		warn("[UnifiedDataStoreManager] Failed to clear dungeon timer for user " .. userId .. ": " .. tostring(err))
+		return false
+	end
+	return true
+end
 
 -- Initialize pending changes tracking
 local function initPlayerTracking(userId)
@@ -92,8 +142,13 @@ local function getCurrentStats(player)
 			       data["Equipped"] = {
 				       name = nameValue and nameValue.Value or "",
 				       id = idValue and idValue.Value or ""
-			       }
-		       elseif stat.Name == "EquippedOrb" and stat:IsA("Folder") then
+			       }	       elseif stat.Name == "SecondaryEquipped" and stat:IsA("Folder") then
+		       local nameValue = stat:FindFirstChild("name")
+		       local idValue = stat:FindFirstChild("id")
+		       data["SecondaryEquipped"] = {
+			       name = nameValue and nameValue.Value or "",
+			       id = idValue and idValue.Value or ""
+		       }		       elseif stat.Name == "EquippedOrb" and stat:IsA("Folder") then
 			       local nameValue = stat:FindFirstChild("name")
 			       local idValue = stat:FindFirstChild("id")
 			       data["EquippedOrb"] = {
@@ -166,6 +221,13 @@ local function savePlayerDataToStore(userId, forceImmediate)
 						   name = nameValue and nameValue.Value or "",
 						   id = idValue and idValue.Value or ""
 					   }
+				   elseif stat.Name == "SecondaryEquipped" and stat:IsA("Folder") then
+					   local nameValue = stat:FindFirstChild("name")
+					   local idValue = stat:FindFirstChild("id")
+					   newData["SecondaryEquipped"] = {
+						   name = nameValue and nameValue.Value or "",
+						   id = idValue and idValue.Value or ""
+					   }
 				   elseif stat.Name == "EquippedOrb" and stat:IsA("Folder") then
 					   local nameValue = stat:FindFirstChild("name")
 					   local idValue = stat:FindFirstChild("id")
@@ -173,7 +235,7 @@ local function savePlayerDataToStore(userId, forceImmediate)
 						   name = nameValue and nameValue.Value or "",
 						   id = idValue and idValue.Value or ""
 					   }
-					   print("[UnifiedDataStoreManager] (UpdateAsync) Writing EquippedOrb for userId " .. tostring(userId) .. ": name='" .. (nameValue and nameValue.Value or "nil") .. "', id='" .. (idValue and idValue.Value or "nil") .. "'")
+					   --print("[UnifiedDataStoreManager] (UpdateAsync) Writing EquippedOrb for userId " .. tostring(userId) .. ": name='" .. (nameValue and nameValue.Value or "nil") .. "', id='" .. (idValue and idValue.Value or "nil") .. "'")
 				   elseif (stat.Name == "EquippedSuit" or stat.Name == "EquippedHelmet" or stat.Name == "EquippedLegs" or stat.Name == "EquippedShoes") and stat:IsA("Folder") then
 					  local nameValue = stat:FindFirstChild("name")
 					  local idValue = stat:FindFirstChild("id")
@@ -183,7 +245,7 @@ local function savePlayerDataToStore(userId, forceImmediate)
 					  }
 				   end
 			   end
-			   print("[UnifiedDataStoreManager] (UpdateAsync) FINAL DATA WRITTEN for userId " .. tostring(userId) .. ": " .. game:GetService("HttpService"):JSONEncode(newData))
+			   --print("[UnifiedDataStoreManager] (UpdateAsync) FINAL DATA WRITTEN for userId " .. tostring(userId) .. ": " .. game:GetService("HttpService"):JSONEncode(newData))
 			   return newData
 		end)
 	end)
@@ -199,19 +261,21 @@ local function savePlayerDataToStore(userId, forceImmediate)
 		end
 		return true
 	else
-		warn("[UnifiedDataStoreManager] Failed to save data for player " .. userId .. ": " .. tostring(err))
+		warn("[UnifiedDataStoreManager] ❌ FAILED to save data for user " .. userId)
+		warn("[UnifiedDataStoreManager] Error: " .. tostring(err))
+		if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			warn("[UnifiedDataStoreManager] ⚠️  Studio Access to API Services may be DISABLED!")
+		end
 		return false
 	end
 end
 
--- Public API
-local UnifiedDataStoreManager = {}
 
 -- ===== STATS FUNCTIONS =====
 function UnifiedDataStoreManager.SaveStats(player, forceImmediate)
 	   if not player or not player.UserId then return false end
 	   -- Always remove orb stat bonuses before saving to ensure only base stats are saved
-	   local OrbSpiritHandler = require(game:GetService("ServerScriptService"):WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+	   local OrbSpiritHandler = require(game:GetService("ServerScriptService"):WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
 	-- [REMOVED] OrbSpiritHandler.RemoveOrbStatBonuses
 	   local success = savePlayerDataToStore(player.UserId, forceImmediate)
 	   -- Update cache with latest stats
@@ -310,7 +374,11 @@ function UnifiedDataStoreManager.SaveWeaponData(userId, weaponData, forceImmedia
 		   weaponDataCache[userId] = weaponData
 		   return true
 	   else
-		   warn("[UnifiedDataStoreManager] Failed to save weapon data for user " .. userId .. ": " .. tostring(err))
+		   warn("[UnifiedDataStoreManager] ❌ FAILED to save weapon data for user " .. userId)
+		   warn("[UnifiedDataStoreManager] Error: " .. tostring(err))
+		   if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			   warn("[UnifiedDataStoreManager] ⚠️  Studio Access to API Services may be DISABLED!")
+		   end
 		   markPending(userId, "weapons")
 		   return false
 	   end
@@ -328,7 +396,11 @@ function UnifiedDataStoreManager.LoadWeaponData(userId)
 		   data = weaponDataStore:GetAsync("Player_" .. userId)
 	   end)
 	   if not success then
-		   warn("[UnifiedDataStoreManager] Failed to load weapon data for user " .. userId .. ": " .. tostring(err))
+		   warn("[UnifiedDataStoreManager] ❌ FAILED to load weapon data for user " .. userId)
+		   warn("[UnifiedDataStoreManager] Error: " .. tostring(err))
+		   if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			   warn("[UnifiedDataStoreManager] ⚠️  Studio Access to API Services may be DISABLED!")
+		   end
 		   return nil
 	   end
 	   if data then
@@ -376,7 +448,11 @@ function UnifiedDataStoreManager.SaveOrbData(userId, orbData, forceImmediate)
 		   orbDataCache[userId] = orbData
 		   return true
 	   else
-		   warn("[UnifiedDataStoreManager] Failed to save orb data for user " .. userId .. ": " .. tostring(err))
+		   warn("[UnifiedDataStoreManager] ❌ FAILED to save orb data for user " .. userId)
+		   warn("[UnifiedDataStoreManager] Error: " .. tostring(err))
+		   if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			   warn("[UnifiedDataStoreManager] ⚠️  Studio Access to API Services may be DISABLED!")
+		   end
 		   markPending(userId, "orbs")
 		   return false
 	   end
@@ -394,7 +470,11 @@ function UnifiedDataStoreManager.LoadOrbData(userId)
 		   data = orbDataStore:GetAsync("Player_" .. userId)
 	   end)
 	   if not success then
-		   warn("[UnifiedDataStoreManager] Failed to load orb data for user " .. userId .. ": " .. tostring(err))
+		   warn("[UnifiedDataStoreManager] ❌ FAILED to load orb data for user " .. userId)
+		   warn("[UnifiedDataStoreManager] Error: " .. tostring(err))
+		   if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			   warn("[UnifiedDataStoreManager] ⚠️  Studio Access to API Services may be DISABLED!")
+		   end
 		   return nil
 	   end
 	   if data then
@@ -444,9 +524,9 @@ function UnifiedDataStoreManager.SaveInventory(userId, inventoryData, forceImmed
 		return false
 	end
 	
-	print("[UnifiedDataStoreManager] Saving inventory for userId " .. userId .. " with " .. #inventoryData .. " items")
+	--print("[UnifiedDataStoreManager] Saving inventory for userId " .. userId .. " with " .. #inventoryData .. " items")
 	for i, item in ipairs(inventoryData) do
-		print("[UnifiedDataStoreManager]   Item " .. i .. ": " .. tostring(item.name))
+		--print("[UnifiedDataStoreManager]   Item " .. i .. ": " .. tostring(item.name))
 	end
 	
 	local success, err = pcall(function()
@@ -457,10 +537,14 @@ function UnifiedDataStoreManager.SaveInventory(userId, inventoryData, forceImmed
 		   lastSaveTime[userId] = tick()
 		   clearPending(userId, "inventory")
 		   inventoryCache[userId] = inventoryData
-		   print("[UnifiedDataStoreManager] Successfully saved inventory for userId " .. userId)
+		   --print("[UnifiedDataStoreManager] Successfully saved inventory for userId " .. userId)
 		   return true
 	   else
-		   warn("[UnifiedDataStoreManager] Failed to save inventory for user " .. userId .. ": " .. tostring(err))
+		   warn("[UnifiedDataStoreManager] ❌ FAILED to save inventory for user " .. userId)
+		   warn("[UnifiedDataStoreManager] Error: " .. tostring(err))
+		   if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			   warn("[UnifiedDataStoreManager] ⚠️  Studio Access to API Services may be DISABLED!")
+		   end
 		   markPending(userId, "inventory")
 		   return false
 	   end
@@ -478,17 +562,21 @@ function UnifiedDataStoreManager.LoadInventory(userId)
 		   data = inventoryStore:GetAsync("Player_" .. userId)
 	   end)
 	   if not success then
-		   warn("[UnifiedDataStoreManager] Failed to load inventory for user " .. userId .. ": " .. tostring(err))
+		   warn("[UnifiedDataStoreManager] ❌ FAILED to load inventory for user " .. userId)
+		   warn("[UnifiedDataStoreManager] Error: " .. tostring(err))
+		   if tostring(err):find("502") or tostring(err):find("API Services") or tostring(err):find("Studio") then
+			   warn("[UnifiedDataStoreManager] ⚠️  Studio Access to API Services may be DISABLED!")
+		   end
 		   return nil
 	   end
 	   if data then
-		   print("[UnifiedDataStoreManager] Loaded inventory for userId " .. userId .. ": " .. #data .. " items")
+		   --print("[UnifiedDataStoreManager] Loaded inventory for userId " .. userId .. ": " .. #data .. " items")
 		   for i, item in ipairs(data) do
-			   print("[UnifiedDataStoreManager]   Item " .. i .. ": " .. tostring(item.name or item))
+			   --print("[UnifiedDataStoreManager]   Item " .. i .. ": " .. tostring(item.name or item))
 		   end
 		   inventoryCache[userId] = data
 	   else
-		   print("[UnifiedDataStoreManager] No saved inventory data for userId " .. userId .. " (first time player)")
+		   --print("[UnifiedDataStoreManager] No saved inventory data for userId " .. userId .. " (first time player)")
 	   end
 	   -- Return data even if nil (caller should handle nil case)
 	   return data
@@ -567,20 +655,8 @@ function UnifiedDataStoreManager.SaveAll(player, forceImmediate)
 end
 
 -- Initialize player tracking on join
-Players.PlayerAdded:Connect(function(player)
-	initPlayerTracking(player.UserId)
-
-	-- On respawn, unequip orb and set EquippedOrb to blank
-	local function unequipOrbOnRespawn(character)
-		local stats = player:FindFirstChild("Stats")
-		if stats then
-			local equippedOrb = stats:FindFirstChild("EquippedOrb")
-			if equippedOrb and equippedOrb:IsA("Folder") then
-			end
-		end
-	end
-	player.CharacterAdded:Connect(unequipOrbOnRespawn)
-end)
+-- PlayerAdded handler moved to Init.server.lua for centralized initialization
+-- initPlayerTracking is called from Init.server.lua
 
 -- Cleanup on disconnect
 Players.PlayerRemoving:Connect(function(player)
@@ -599,7 +675,7 @@ Players.PlayerRemoving:Connect(function(player)
 	task.wait(0.05)
 
 	-- FINAL: Force immediate save of ALL data (stats, quests, etc.)
-	print("[UnifiedDataStoreManager] Forcing final save of ALL data for userId " .. tostring(userId))
+	--print("[UnifiedDataStoreManager] Forcing final save of ALL data for userId " .. tostring(userId))
 	UnifiedDataStoreManager.SaveAll(player, true)
 
 	-- Cleanup tracking tables
@@ -641,7 +717,7 @@ end
 function UnifiedDataStoreManager.SaveAll(player, forceImmediate)
 	if not player or not player.UserId then return false end
 	
-	print("[UnifiedDataStoreManager] Saving ALL data for", player.Name)
+	--print("[UnifiedDataStoreManager] Saving ALL data for", player.Name)
 	
 	-- Save stats
 	UnifiedDataStoreManager.SaveStats(player, forceImmediate)
@@ -718,7 +794,7 @@ function UnifiedDataStoreManager.ResetPlayerData(userId)
 	success = statsSuccess and weaponSuccess and orbSuccess and inventorySuccess and questSuccess
 	
 	if success then
-		print("[UnifiedDataStoreManager] Successfully reset ALL data (stats, weapons, orbs, inventory, quests) for user " .. userId)
+		--print("[UnifiedDataStoreManager] Successfully reset ALL data (stats, weapons, orbs, inventory, quests) for user " .. userId)
 	else
 		warn("[UnifiedDataStoreManager] Failed to reset some data for user " .. userId)
 	end
@@ -747,7 +823,7 @@ function UnifiedDataStoreManager.ResetAllPlayersData()
 				if cursor.IsFinished then break end
 				cursor:AdvanceToNextPageAsync()
 			end
-			print("[UnifiedDataStoreManager] Cleared all entries from " .. storeName)
+			--print("[UnifiedDataStoreManager] Cleared all entries from " .. storeName)
 		end)
 		return success
 	end
@@ -770,10 +846,10 @@ function UnifiedDataStoreManager.ResetAllPlayersData()
 	local allSuccess = statsCleared and weaponsCleared and orbsCleared and inventoryCleared and questsCleared
 	
 	if allSuccess then
-		print("[UnifiedDataStoreManager] ⚠️  COMPLETE RESET - All player data (online and offline) has been deleted from all DataStores!")
-		print("[UnifiedDataStoreManager] Players reset: " .. successCount)
+		--print("[UnifiedDataStoreManager] ⚠️  COMPLETE RESET - All player data (online and offline) has been deleted from all DataStores!")
+		--print("[UnifiedDataStoreManager] Players reset: " .. successCount)
 	else
-		print("[UnifiedDataStoreManager] ⚠️  PARTIAL RESET - Some DataStore entries may not have been cleared")
+		--print("[UnifiedDataStoreManager] ⚠️  PARTIAL RESET - Some DataStore entries may not have been cleared")
 		failureCount = 1
 	end
 	
@@ -783,6 +859,9 @@ end
 if game:IsA("DataModel") then
 	-- All shutdown saves are handled by PlayerDataStore
 end
+
+-- Export initPlayerTracking for Init.server.lua to call
+UnifiedDataStoreManager.initPlayerTracking = initPlayerTracking
 
 -- UnifiedDataStoreManager.ResetAllPlayersData()
 return UnifiedDataStoreManager

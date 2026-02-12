@@ -23,10 +23,11 @@ local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Librar
 local NpcQuestData = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("NpcQuestData"))
 
 -- Load PartyDataStore for party tracking
-local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("PartyDataStore"))
+local PartyDataStore = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Party"):WaitForChild("PartyDataStore"))
 
 -- Load LevelSystem for level up checks
 local LevelSystem = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Player"):WaitForChild("LevelSystem"))
+local DungeonsData = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("DungeonsData"))
 
 local SoundModule = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("SoundModule"))
 
@@ -39,18 +40,24 @@ if not questCompleteEvent then
 	questCompleteEvent.Parent = ReplicatedStorage
 end
 
+-- Helper: Recursively add parts to a collision group
+local function addToCollisionGroupRecursive(obj, groupName)
+	if not obj then return end
+	if obj:IsA("BasePart") then
+		pcall(function() 
+			obj.CollisionGroup = groupName
+		end)
+	end
+	for _, child in ipairs(obj:GetChildren()) do 
+		addToCollisionGroupRecursive(child, groupName) 
+	end
+end
+
 -- Add all Map folder parts to "Env" collision group once at startup
 local function initializeMapCollision()
 	local mapFolder = workspace:FindFirstChild("Map")
 	if mapFolder then
-		local function addMapToEnvironment(obj)
-			if not obj then return end
-			if obj:IsA("BasePart") then
-				pcall(function() PhysicsService:CollisionGroupAddMember("Env", obj) end)
-			end
-			for _, child in ipairs(obj:GetChildren()) do addMapToEnvironment(child) end
-		end
-		addMapToEnvironment(mapFolder)
+		addToCollisionGroupRecursive(mapFolder, "Env")
 	end
 end
 
@@ -107,15 +114,16 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 -- Monitor new players
-Players.PlayerAdded:Connect(function(player)
-	addPlayerToGroup(player)
-end)
+-- PlayerAdded handler moved to Init.server.lua for centralized initialization
+-- addPlayerToGroup is called from Init.server.lua
 
+-- Make addPlayerToGroup public so Init can call it
+EnemiesManager.addPlayerToGroup = addPlayerToGroup
 
 function EnemiesManager.Start(model)
 	local slime = model
 	-- DEBUG: Print all children and part info for this enemy model
-	print("[EnemyInit] Initializing enemy:", slime.Name)
+	--print("[EnemyInit] Initializing enemy:", slime.Name)
 	local function printChildren(obj, indent)
 		indent = indent or ""
 		for _, child in ipairs(obj:GetChildren()) do
@@ -123,11 +131,11 @@ function EnemiesManager.Start(model)
 			if child:IsA("BasePart") then
 				info = info .. string.format(" [CanCollide=%s, Anchored=%s, CollisionGroup=%s]", tostring(child.CanCollide), tostring(child.Anchored), child.CollisionGroup)
 			end
-			print(info)
-			printChildren(child, indent .. "  ")
+			--print(info)
+			-- printChildren(child, indent .. "  ")
 		end
 	end
-	printChildren(slime)
+	-- printChildren(slime)
 	if not slime then warn("[EnemiesModule] Model not found!"); return end
 	
 	-- Prevent double initialization (might be called from both DescendantAdded and respawn code)
@@ -140,13 +148,9 @@ function EnemiesManager.Start(model)
 	pcall(function() PhysicsService:RegisterCollisionGroup(COLLISION_GROUP) end)
 	PhysicsService:CollisionGroupSetCollidable(COLLISION_GROUP, COLLISION_GROUP, false)
 	pcall(function() PhysicsService:CollisionGroupSetCollidable(COLLISION_GROUP, "Env", true) end)
+	pcall(function() PhysicsService:CollisionGroupSetCollidable(COLLISION_GROUP, "Default", true) end)
 
-	local function setCollisionGroupRecursive(obj)
-		if not obj then return end
-		if obj:IsA("BasePart") then obj.CollisionGroup = COLLISION_GROUP end
-		for _, child in ipairs(obj:GetChildren()) do setCollisionGroupRecursive(child) end
-	end
-	setCollisionGroupRecursive(slime)
+	addToCollisionGroupRecursive(slime, COLLISION_GROUP)
 
 	local humanoid = slime:FindFirstChild("Humanoid")
 	if not humanoid then warn("[EnemiesModule] Humanoid not found in model!") end
@@ -257,53 +261,6 @@ function EnemiesManager.Start(model)
 
 	local animState = {lastAnim = nil}
 	playEnemyAnimation(slime, "Idle", nil, animState)
-
-	local function moveTowardsTarget()
-		while humanoid and humanoid.Health > 0 do
-			local isOnGround = isGrounded()
-			
-			-- Find target and move towards it
-			local target = findNearestPlayer()
-			local targetDirection = Vector3.new(0, 0, 0)
-			local distanceToPlayer = math.huge
-			
-			if target then
-				local targetRoot = target:FindFirstChild("HumanoidRootPart")
-				if targetRoot then
-					-- Calculate direction to player
-					targetDirection = (targetRoot.Position - root.Position).unit
-					distanceToPlayer = (targetRoot.Position - root.Position).Magnitude
-					desiredFacingCFrame = CFrame.new(root.Position, Vector3.new(targetRoot.Position.X, root.Position.Y, targetRoot.Position.Z))
-				end
-			elseif defaultPosition then
-				local direction = (defaultPosition - root.Position)
-				if direction.Magnitude > 1 then
-					targetDirection = direction.unit
-					desiredFacingCFrame = CFrame.new(root.Position, defaultPosition)
-				end
-			end
-			
-			-- Move towards target (walk, no jumping)
-			if targetDirection.Magnitude > 0 then
-				local currentVel = root.Velocity
-				-- Keep current Y velocity (gravity), add horizontal movement
-				root.Velocity = Vector3.new(targetDirection.X * 20, currentVel.Y, targetDirection.Z * 20)
-				playEnemyAnimation(slime, "Walk", nil, animState)
-			else
-				-- No target, apply friction
-				local currentVel = root.Velocity
-				root.Velocity = Vector3.new(currentVel.X * 0.95, currentVel.Y, currentVel.Z * 0.95)
-				playEnemyAnimation(slime, "Idle", nil, animState)
-			end
-			
-			-- Jump continuously while touching/very close to player (attack range ~5 studs)
-			if distanceToPlayer < 5 and isOnGround then
-				root.Velocity = Vector3.new(root.Velocity.X, jumpPower, root.Velocity.Z)
-			end
-			
-			task.wait(0.016)  -- Consistent 60fps update
-		end
-	end
 
 	-- Setup real-time listener for player stat changes
 	local function setupPlayerStatListener(player)
@@ -432,29 +389,55 @@ function EnemiesManager.Start(model)
 		end
 	end
 
-	local currentlyTouching = {} -- Track players currently touching
+	local currentlyTouching = {} -- Track players currently touching (userId -> character reference)
 	local damageLoopRunning = {} -- Track if damage loop already running for a player
-	local touchedDebounce = {} -- Prevent Touched event from firing multiple times per player
+	local touchDebounce = {} -- Debounce to prevent multiple parts from triggering simultaneously
 	
-	local function applyDamageToPlayer(player)
-		if not player or not player.Character then return end
+	-- Function to clean up player tracking when they die or leave
+	local function cleanupPlayerTracking(userId)
+		-- print(string.format("[Cleanup] Clearing tracking for userId %s", tostring(userId)))
+		currentlyTouching[userId] = nil
+		damageLoopRunning[userId] = nil
+		touchDebounce[userId] = nil
+	end
+	
+	local function applyDamageToPlayer(player, expectedCharacter)
+		if not player or not player.Character then 
+			cleanupPlayerTracking(player and player.UserId)
+			return 
+		end
+		
+		-- Verify it's still the same character that touched the enemy
+		if player.Character ~= expectedCharacter then
+			cleanupPlayerTracking(player.UserId)
+			return
+		end
 		
 		local userId = player.UserId
 		local statsFolder = player:FindFirstChild("Stats")
-		if not statsFolder then return end
+		if not statsFolder then 
+			cleanupPlayerTracking(userId)
+			return 
+		end
 		
 		local currentHealthValue = statsFolder:FindFirstChild("CurrentHealth")
 		local maxHealthValue = statsFolder:FindFirstChild("MaxHealth")
-		if not currentHealthValue or not maxHealthValue then return end
+		if not currentHealthValue or not maxHealthValue then 
+			cleanupPlayerTracking(userId)
+			return 
+		end
 		
-		-- Check if player is already dead
-		if currentHealthValue.Value <= 0 then 
-			currentlyTouching[userId] = nil
+		-- Check if player is already dead or character humanoid is dead
+		local humanoid = player.Character:FindFirstChild("Humanoid")
+		if not humanoid or humanoid.Health <= 0 or currentHealthValue.Value <= 0 then 
+			cleanupPlayerTracking(userId)
 			return 
 		end
 		
 		-- Calculate actual damage after player's defense reduction
 		local actualDamage = DamageManager.CalculateIncomingDamage(damage, player)
+		
+		-- print(string.format("[Damage] %s damaged %s for %d HP (Time: %.2f)", slime.Name, player.Name, actualDamage, tick()))
 		
 		-- Apply damage directly to the DataStore-synced CurrentHealth
 		currentHealthValue.Value = math.max(currentHealthValue.Value - actualDamage, 0)
@@ -468,21 +451,33 @@ function EnemiesManager.Start(model)
 				damageEvent:FireClient(player, targetPart, actualDamage, false, false)
 			end
 		end
-		-- Play Attack1 animation for 1 second, then Idle, repeat if still colliding
-		task.spawn(function()
-			attackAndIdleLoop(slime, currentlyTouching, userId)
-			-- Only reset animation state if enemy is no longer damaging the player
-			if not currentlyTouching[userId] then
-				animState.lastAnim = nil
-			end
-		end)
 
 		-- If player died from this hit
 		if currentHealthValue.Value <= 0 then
+			local character = player.Character
 			if character then character:BreakJoints() end
-			currentlyTouching[userId] = nil
+			cleanupPlayerTracking(userId)
 		end
 	end
+	
+	-- Setup character cleanup for all players
+	local playerCharacterConnections = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		if not playerCharacterConnections[player.UserId] then
+			playerCharacterConnections[player.UserId] = player.CharacterRemoving:Connect(function()
+				cleanupPlayerTracking(player.UserId)
+			end)
+		end
+	end
+	
+	-- Monitor new players
+	Players.PlayerAdded:Connect(function(player)
+		if not playerCharacterConnections[player.UserId] then
+			playerCharacterConnections[player.UserId] = player.CharacterRemoving:Connect(function()
+				cleanupPlayerTracking(player.UserId)
+			end)
+		end
+	end)
 	
 	-- Connect Touched and TouchEnded to all BasePart children of the enemy
 	local touchConnections = {}
@@ -495,46 +490,133 @@ function EnemiesManager.Start(model)
 					local player = Players:GetPlayerFromCharacter(character)
 					if player then
 						local userId = player.UserId
-						-- Prevent multiple parts from triggering damage
-						if touchedDebounce[userId] then return end
-						touchedDebounce[userId] = true
-						task.delay(1, function() touchedDebounce[userId] = nil end)
-						-- Setup real-time listener for this player's stats if not already done
-						if not playerStatConnections[userId] then
-							setupPlayerStatListener(player)
-						end
-						-- Mark player as currently touching
-						if not currentlyTouching[userId] then
-							currentlyTouching[userId] = true
-							-- Apply damage immediately on first touch
-							applyDamageToPlayer(player)
-							-- Only start damage loop if one isn't already running
-							if not damageLoopRunning[userId] then
-								damageLoopRunning[userId] = true
-								-- Then apply damage every 1 second while still touching
-								task.spawn(function()
-									while currentlyTouching[userId] and player.Character do
-										task.wait(1)
-										if currentlyTouching[userId] then
-											applyDamageToPlayer(player)
-										end
-									end
-									damageLoopRunning[userId] = nil
-								end)
+						local characterHumanoid = character:FindFirstChild("Humanoid")
+						
+						-- Don't damage if player is already dead
+						if not characterHumanoid or characterHumanoid.Health <= 0 then return end
+						
+					-- Prevent multiple parts from triggering damage - check debounce first
+					if touchDebounce[userId] then 
+						-- print(string.format("[Touch] BLOCKED by debounce for %s", player.Name))
+						return 
+					end
+					
+					-- ATOMIC: Set debounce flag IMMEDIATELY to block other parts
+					touchDebounce[userId] = true
+					
+					-- Double-check after debounce to prevent race conditions
+					if currentlyTouching[userId] or damageLoopRunning[userId] then 
+						-- print(string.format("[Touch] BLOCKED by tracking flags for %s", player.Name))
+						touchDebounce[userId] = nil -- Clear debounce if we exit early
+						return 
+					end
+					
+					-- CRITICAL: Set tracking flags IMMEDIATELY to claim this player
+					currentlyTouching[userId] = character
+					damageLoopRunning[userId] = true
+					
+					-- print(string.format("[Touch] %s touched %s - Starting damage loops", player.Name, slime.Name))
+					
+					-- Setup real-time listener for this player's stats if not already done
+					if not playerStatConnections[userId] then
+						setupPlayerStatListener(player)
+					end
+						
+					-- Start animation loop (runs independently from damage loop)
+					task.spawn(function()
+						repeat
+							-- Play Attack1 for 1 second
+							local humanoid = slime:FindFirstChild("Humanoid")
+							local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+							local attackAnim = slime:FindFirstChild("Attack1")
+							local upperTorso = slime:FindFirstChild("UpperTorso")
+							local slash1 = upperTorso and upperTorso:FindFirstChild("Slash1")
+							if animator and attackAnim then
+								for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+									track:Stop()
+								end
+								local track = animator:LoadAnimation(attackAnim)
+								track:Play(0, 1, track.Length)
+								track:AdjustSpeed(track.Length > 0 and (track.Length / 1) or 1)
+								-- Enable Slash1 only while Attack1 is playing
+								if slash1 then
+									slash1.Enabled = true
+									task.delay(track.Length, function()
+										slash1.Enabled = false
+									end)
+								end
 							end
-						end
+
+							task.wait(1)
+							-- Play Idle
+							local idleAnim = slime:FindFirstChild("Idle")
+							if animator and idleAnim then
+								for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+									track:Stop()
+								end
+								local idleTrack = animator:LoadAnimation(idleAnim)
+								idleTrack:Play()
+							end
+							task.wait(0.1)
+						until not currentlyTouching[userId]
+					end)
+					
+					-- Start continuous damage loop (applies damage immediately, then every 1 second)
+					-- print(string.format("[Loop] Starting continuous damage loop for %s", player.Name))
+					task.spawn(function()
+						local trackedCharacter = character
+						local loopCount = 0
+						
+						-- Apply first damage immediately
+						-- print(string.format("[Loop] First damage application for %s", player.Name))
+						applyDamageToPlayer(player, trackedCharacter)
+						local lastDamageTime = tick() -- Record time AFTER first damage
+						
+						while player.Character == trackedCharacter do
+							task.wait(1) -- Wait full second
+							loopCount = loopCount + 1
+							
+							-- Check distance to enemy to determine if still in combat
+							local playerRoot = trackedCharacter and trackedCharacter:FindFirstChild("HumanoidRootPart")
+							local enemyRoot = slime:FindFirstChild("HumanoidRootPart")
+							local distanceToEnemy = math.huge
+							
+							if playerRoot and enemyRoot then
+								distanceToEnemy = (playerRoot.Position - enemyRoot.Position).Magnitude
+							end
+							
+							-- Stop loop if player moved far away (> 10 studs)
+							if distanceToEnemy > 10 then
+								-- print(string.format("[Loop] %s moved away (distance: %.1f studs) - ending loop", player.Name, distanceToEnemy))
+								break
+							end
+							
+							local currentTime = tick()
+							local timeSinceLastDamage = currentTime - lastDamageTime
+							
+							-- Apply damage if enough time has passed
+							if (currentTime - lastDamageTime) >= 0.95 then
+								-- print(string.format("[Loop] Iteration %d - Applying damage to %s (Dist: %.1f)", loopCount, player.Name, distanceToEnemy))
+								applyDamageToPlayer(player, trackedCharacter)
+								lastDamageTime = currentTime
+							end
+							
+							-- Check if player died
+							if not currentlyTouching[userId] then
+								-- print(string.format("[Loop] %s died or was cleaned up - ending loop", player.Name))
+								break
+							end
+							end
+							
+							-- print(string.format("[Loop] Ending damage loop for %s after %d iterations", player.Name, loopCount))
+							cleanupPlayerTracking(userId)
+					end)
 					end
 				end
 			end))
 			table.insert(touchEndConnections, part.TouchEnded:Connect(function(hit)
-				local character = hit.Parent
-				if character and character:FindFirstChild("Humanoid") then
-					local player = Players:GetPlayerFromCharacter(character)
-					if player then
-						currentlyTouching[player.UserId] = nil
-						-- No longer disabling Slash1 here; it stays enabled while attacking
-					end
-				end
+				-- TouchEnd fires constantly during movement - don't cleanup here
+				-- Let the damage loop handle distance checking and cleanup
 			end))
 		end
 	end
@@ -640,7 +722,7 @@ function EnemiesManager.Start(model)
 					if maxPlayerDamage > mostDamageAmount then
 						mostDamageAmount = maxPlayerDamage
 						mostDamageDealer = player
-						print("[EnemiesModule] 💥 Most damage dealer updated:", player.Name, "with", maxPlayerDamage, "total damage")
+						--print("[EnemiesModule] 💥 Most damage dealer updated:", player.Name, "with", maxPlayerDamage, "total damage")
 					end
 					
 					-- Track for experience distribution
@@ -670,25 +752,16 @@ function EnemiesManager.Start(model)
 	end)
 
 	local desiredFacingCFrame = root and root.CFrame or CFrame.new()
-	local desiredVelocity = Vector3.new(0, 0, 0)
-	local groundedFrames = 0
 	
-	task.spawn(function()
-		while humanoid and humanoid.Health > 0 do
-			if root and desiredFacingCFrame then
-				root.CFrame = root.CFrame:Lerp(desiredFacingCFrame, 0.1)  -- Smoother rotation
-			end
-			task.wait(0.016)  -- ~60fps for smoother updates
-		end
-	end)
-
+	-- Cache raycast params to avoid recreation every frame
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = {slime}
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+	local rayDirection = Vector3.new(0, -3.5, 0)
+	
 	local function isGrounded()
 		if not root then return false end
-		local rayOrigin, rayDirection = root.Position, Vector3.new(0, -3.5, 0)
-		local raycastParams = RaycastParams.new()
-		raycastParams.FilterDescendantsInstances = {root.Parent}
-		raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-		local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+		local result = workspace:Raycast(root.Position, rayDirection, raycastParams)
 		return result ~= nil
 	end
 
@@ -705,9 +778,11 @@ function EnemiesManager.Start(model)
 				local targetRoot = target:FindFirstChild("HumanoidRootPart")
 				if targetRoot then
 					-- Calculate direction to player
-					targetDirection = (targetRoot.Position - root.Position).unit
-					distanceToPlayer = (targetRoot.Position - root.Position).Magnitude
-					desiredFacingCFrame = CFrame.new(root.Position, Vector3.new(targetRoot.Position.X, root.Position.Y, targetRoot.Position.Z))
+					local rootPos = root.Position
+					local targetPos = targetRoot.Position
+					targetDirection = (targetPos - rootPos).unit
+					distanceToPlayer = (targetPos - rootPos).Magnitude
+					desiredFacingCFrame = CFrame.new(rootPos, Vector3.new(targetPos.X, rootPos.Y, targetPos.Z))
 				end
 			elseif defaultPosition then
 				local direction = (defaultPosition - root.Position)
@@ -715,6 +790,11 @@ function EnemiesManager.Start(model)
 					targetDirection = direction.unit
 					desiredFacingCFrame = CFrame.new(root.Position, defaultPosition)
 				end
+			end
+			
+			-- Smooth rotation
+			if desiredFacingCFrame then
+				root.CFrame = root.CFrame:Lerp(desiredFacingCFrame, 0.1)
 			end
 			
 			-- Move towards target (walk, no jumping)
@@ -751,14 +831,7 @@ function EnemiesManager.Start(model)
 			PhysicsService:CollisionGroupSetCollidable("DeadEnemies", "DeadEnemies", true)
 
 			-- Add all slime parts to DeadEnemies group immediately
-			local function addToDeadEnemiesGroup(obj)
-				if not obj then return end
-				if obj:IsA("BasePart") then 
-					obj.CollisionGroup = "DeadEnemies"
-				end
-				for _, child in ipairs(obj:GetChildren()) do addToDeadEnemiesGroup(child) end
-			end
-			addToDeadEnemiesGroup(slime)
+			addToCollisionGroupRecursive(slime, "DeadEnemies")
 
 			-- Disconnect all damage connections so dead slime doesn't hurt players
 			for _, conn in ipairs(touchConnections) do
@@ -782,6 +855,12 @@ function EnemiesManager.Start(model)
 				if connection then connection:Disconnect() end
 			end
 			table.clear(playerStatConnections)
+			
+			-- Cleanup all player character removal listeners
+			for userId, connection in pairs(playerCharacterConnections) do
+				if connection then connection:Disconnect() end
+			end
+			table.clear(playerCharacterConnections)
 
 			respawnPosition = defaultPosition  -- Save the spawn position for respawn
 
@@ -818,23 +897,19 @@ function EnemiesManager.Start(model)
 		end
 		
 		-- Debug: Log experience distribution and damage breakdown
-		print("[EnemiesModule] ====== ENEMY DIED ======")
-		print("[EnemiesModule] Enemy:", enemyName)
-		print("[EnemiesModule] Experience:", enemyExperience)
-		print("[EnemiesModule] Total Damage:", totalDamage)
-		print("[EnemiesModule] Players who dealt damage:", table.getn(playerDamage))
-		print("[EnemiesModule] Most damage dealer:", mostDamageDealer and mostDamageDealer.Name or "NONE", "with", mostDamageAmount, "damage")
-		for userId, dmg in pairs(playerDamage) do
-			local p = Players:GetPlayerByUserId(userId)
-			print("[EnemiesModule]   -", p and p.Name or "Unknown", "dealt", dmg, "damage")
+		-- Debug logging
+		if #playerDamage > 0 then
+			--print("[EnemiesModule] ====== ENEMY DIED ======")
+			--print("[EnemiesModule] Enemy:", enemyName, "| XP:", enemyExperience, "| Total Damage:", totalDamage)
+			--print("[EnemiesModule] Most damage dealer:", mostDamageDealer and mostDamageDealer.Name or "NONE", "with", mostDamageAmount, "damage")
+			--print("[EnemiesModule] ====== END ======")
 		end
-		print("[EnemiesModule] ====== END ======")
 		
 		-- Distribute experience to all players who dealt damage, proportional to their damage
 		if enemyExperience > 0 then
 			if totalDamage > 0 then
 				-- Get PartyDataStore for party-based experience sharing
-				local PartyDataStore = require(script.Parent.Parent:WaitForChild("PartyDataStore"))
+				local PartyDataStore = require(script.Parent.Parent:WaitForChild("Party"):WaitForChild("PartyDataStore"))
 				
 				-- Build a map of players by party to handle party-based experience division
 				local playersByParty = {} -- partyId -> {players with damage}
@@ -872,96 +947,129 @@ function EnemiesManager.Start(model)
 					end
 				end
 				
-				-- Distribute experience to solo players (proportional)
-				for _, entry in ipairs(soloPlayers) do
-					local player = entry.player
-					local damageDealt = entry.damage
-					
-					if player then
-						local stats = player:FindFirstChild("Stats")
-						if stats then
-							-- Calculate solo player's share based on damage percentage
-							local damagePercentage = damageDealt / totalDamage
-							local playerExperience = math.floor(enemyExperience * damagePercentage)
-							local xpToAward = math.max(playerExperience, 1)
-							
-							local experienceValue = stats:FindFirstChild("Experience")
-							if experienceValue then
-								experienceValue.Value = experienceValue.Value + xpToAward
-								print("[EnemiesModule] Awarded", xpToAward, "XP to SOLO player", player.Name)
-								
-								LevelSystem.checkLevelUp(player)
-								print("[EnemiesModule] 🆙 Level-up check triggered for", player.Name)
-							end
-						end
-					end
-				end
+				   -- Distribute experience and gold to solo players (proportional, with dungeon multipliers)
+				   for _, entry in ipairs(soloPlayers) do
+					   local player = entry.player
+					   local damageDealt = entry.damage
+					   if player then
+						   local stats = player:FindFirstChild("Stats")
+						   if stats then
+							   -- Calculate solo player's share based on damage percentage
+							   local damagePercentage = damageDealt / totalDamage
+							   -- Get dungeon multipliers if in a dungeon
+							   local playerMap = stats:FindFirstChild("PlayerMap")
+							   local mapName = playerMap and playerMap.Value
+							   local xpMultiplier, goldMultiplier = 1, 1
+							   if mapName and DungeonsData[mapName] then
+								   xpMultiplier = DungeonsData[mapName].ExpMultiplier or 1
+								   goldMultiplier = DungeonsData[mapName].GoldMultiplier or 1
+							   end
+							   local playerExperience = math.floor((enemyExperience * damagePercentage) * xpMultiplier)
+							   local xpToAward = math.max(playerExperience, 1)
+							   local playerGold = math.floor((coinValue * damagePercentage) * goldMultiplier)
+							   local goldToAward = math.max(playerGold, 0)
+							   local experienceValue = stats:FindFirstChild("Experience")
+							   if experienceValue then
+								   experienceValue.Value = experienceValue.Value + xpToAward
+								   --print("[EnemiesModule] Awarded", xpToAward, "XP to SOLO player", player.Name, "(multiplier:", xpMultiplier, ")")
+								   LevelSystem.checkLevelUp(player)
+								   --print("[EnemiesModule] 🆙 Level-up check triggered for", player.Name)
+							   end
+							   -- Award gold (Money stat)
+							   if goldToAward > 0 then
+								   local moneyValue = stats:FindFirstChild("Money")
+								   if moneyValue then
+									   moneyValue.Value = moneyValue.Value + goldToAward
+									   --print("[EnemiesModule] Awarded", goldToAward, "Gold to SOLO player", player.Name, "(multiplier:", goldMultiplier, ")")
+								   end
+							   end
+						   end
+					   end
+				   end
 				
-				-- Distribute experience to party members (divide equally within each party, including non-damaging members)
-				for partyId, partyDamages in pairs(playersByParty) do
-					-- Calculate total damage for this party
-					local partyTotalDamage = 0
-					for _, entry in ipairs(partyDamages) do
-						partyTotalDamage = partyTotalDamage + entry.damage
-					end
-					
-					-- Calculate this party's share of total experience (based on party's total damage)
-					local partyDamagePercentage = partyTotalDamage / totalDamage
-					local partyTotalExperience = math.floor(enemyExperience * partyDamagePercentage)
-					
-					-- Get all party members (not just those who dealt damage)
-					local allPartyMembers = partyMembers[partyId] or {}
-					
-					-- Count online members (members whose characters exist)
-					local onlineMemberCount = 0
-					for _, member in ipairs(allPartyMembers) do
-						if member and member.Parent then
-							onlineMemberCount = onlineMemberCount + 1
-						end
-					end
-					
-					-- If no online members, skip (shouldn't happen, but safety check)
-					if onlineMemberCount == 0 then
-						onlineMemberCount = #partyDamages
-					end
-					
-					-- Divide equally among ALL online party members (including those who didn't deal damage)
-					local experiencePerMember = math.floor(partyTotalExperience / onlineMemberCount)
-					local xpPerMember = math.max(experiencePerMember, 1)
-					
-					print("[EnemiesModule] 👥 Party", partyId, "gets", partyTotalExperience, "XP total, divided equally =", xpPerMember, "each to", onlineMemberCount, "online members")
-					
-					-- Award experience to ALL online party members
-					for _, member in ipairs(allPartyMembers) do
-						if member and member.Parent then
-							local stats = member:FindFirstChild("Stats")
-							if stats then
-								local experienceValue = stats:FindFirstChild("Experience")
-								if experienceValue then
-									experienceValue.Value = experienceValue.Value + xpPerMember
-									
-									-- Check if member dealt damage
-									local dealtDamage = false
-									for _, entry in ipairs(partyDamages) do
-										if entry.player == member then
-											dealtDamage = true
-											break
-										end
-									end
-									
-									local damageNote = dealtDamage and "(dealt damage)" or "(no damage - party support)"
-									print("[EnemiesModule] Awarded", xpPerMember, "XP to PARTY member", member.Name, damageNote, "(party:", partyId .. ")")
-									
-									LevelSystem.checkLevelUp(member)
-									print("[EnemiesModule] 🆙 Level-up check triggered for", member.Name)
-								end
-							end
-						end
-					end
-				end
+				   -- Distribute experience and gold to party members (divide equally, with dungeon multipliers)
+				   for partyId, partyDamages in pairs(playersByParty) do
+					   -- Calculate total damage for this party
+					   local partyTotalDamage = 0
+					   for _, entry in ipairs(partyDamages) do
+						   partyTotalDamage = partyTotalDamage + entry.damage
+					   end
+					   -- Calculate this party's share of total experience/gold (based on party's total damage)
+					   local partyDamagePercentage = partyTotalDamage / totalDamage
+					   -- Use the first online member's map for multiplier (assume all in same map)
+					   local firstOnlineMember = nil
+					   local allPartyMembers = partyMembers[partyId] or {}
+					   for _, member in ipairs(allPartyMembers) do
+						   if member and member.Parent then
+							   firstOnlineMember = member
+							   break
+						   end
+					   end
+					   local xpMultiplier, goldMultiplier = 1, 1
+					   if firstOnlineMember then
+						   local stats = firstOnlineMember:FindFirstChild("Stats")
+						   local playerMap = stats and stats:FindFirstChild("PlayerMap")
+						   local mapName = playerMap and playerMap.Value
+						   if mapName and DungeonsData[mapName] then
+							   xpMultiplier = DungeonsData[mapName].ExpMultiplier or 1
+							   goldMultiplier = DungeonsData[mapName].GoldMultiplier or 1
+						   end
+					   end
+					   local partyTotalExperience = math.floor((enemyExperience * partyDamagePercentage) * xpMultiplier)
+					   local partyTotalGold = math.floor((coinValue * partyDamagePercentage) * goldMultiplier)
+					   -- Count online members (members whose characters exist)
+					   local onlineMemberCount = 0
+					   for _, member in ipairs(allPartyMembers) do
+						   if member and member.Parent then
+							   onlineMemberCount = onlineMemberCount + 1
+						   end
+					   end
+					   if onlineMemberCount == 0 then
+						   onlineMemberCount = #partyDamages
+					   end
+					   -- Divide equally among ALL online party members (including those who didn't deal damage)
+					   local experiencePerMember = math.floor(partyTotalExperience / onlineMemberCount)
+					   local xpPerMember = math.max(experiencePerMember, 1)
+					   local goldPerMember = math.floor(partyTotalGold / onlineMemberCount)
+					   local goldPerMemberFinal = math.max(goldPerMember, 0)
+					   --print("[EnemiesModule] 👥 Party", partyId, "gets", partyTotalExperience, "XP total, divided equally =", xpPerMember, "each to", onlineMemberCount, "online members (multiplier:", xpMultiplier, ")")
+					   --print("[EnemiesModule] 👥 Party", partyId, "gets", partyTotalGold, "Gold total, divided equally =", goldPerMemberFinal, "each to", onlineMemberCount, "online members (multiplier:", goldMultiplier, ")")
+					   -- Award experience and gold to ALL online party members
+					   for _, member in ipairs(allPartyMembers) do
+						   if member and member.Parent then
+							   local stats = member:FindFirstChild("Stats")
+							   if stats then
+								   local experienceValue = stats:FindFirstChild("Experience")
+								   if experienceValue then
+									   experienceValue.Value = experienceValue.Value + xpPerMember
+									   -- Check if member dealt damage
+									   local dealtDamage = false
+									   for _, entry in ipairs(partyDamages) do
+										   if entry.player == member then
+											   dealtDamage = true
+											   break
+										   end
+									   end
+									   local damageNote = dealtDamage and "(dealt damage)" or "(no damage - party support)"
+									   --print("[EnemiesModule] Awarded", xpPerMember, "XP to PARTY member", member.Name, damageNote, "(party:", partyId .. ")")
+									   LevelSystem.checkLevelUp(member)
+									   --print("[EnemiesModule] 🆙 Level-up check triggered for", member.Name)
+								   end
+								   -- Award gold (Money stat)
+								   if goldPerMemberFinal > 0 then
+									   local moneyValue = stats:FindFirstChild("Money")
+									   if moneyValue then
+										   moneyValue.Value = moneyValue.Value + goldPerMemberFinal
+										   --print("[EnemiesModule] Awarded", goldPerMemberFinal, "Gold to PARTY member", member.Name, "(party:", partyId .. ")")
+									   end
+								   end
+							   end
+						   end
+					   end
+				   end
 			else
 				-- No damage tracked - don't award XP to anyone
-				print("[EnemiesModule] WARNING: No damage tracked for", enemyName, "! No XP awarded.")
+				--print("[EnemiesModule] WARNING: No damage tracked for", enemyName, "! No XP awarded.")
 			end
 		end
 		
@@ -992,27 +1100,9 @@ function EnemiesManager.Start(model)
 				coinRoot.CFrame = CFrame.fromMatrix(dropSpawnPosition, originalCFrame.RightVector, originalCFrame.UpVector)
 			end
 			
-			-- Anchor all coin parts
-			local function anchorCoinParts(obj)
-				if not obj then return end
-				if obj:IsA("BasePart") then
-					obj.Anchored = true
-				end
-				for _, child in ipairs(obj:GetChildren()) do anchorCoinParts(child) end
-			end
-			-- anchorCoinParts(coin)
-			
 			-- Apply coin collision group (same as enemies)
 			local COIN_GROUP = "Coins"
-			local function setCoinCollisionGroup(obj)
-				if not obj then return end
-				if obj:IsA("BasePart") then 
-					obj.CollisionGroup = COIN_GROUP
-					-- Don't set CanCollide to false - let collision groups handle it
-				end
-				for _, child in ipairs(obj:GetChildren()) do setCoinCollisionGroup(child) end
-			end
-			setCoinCollisionGroup(coin)
+			addToCollisionGroupRecursive(coin, COIN_GROUP)
 			
 			-- Store coin value and mark as collectible item
 			local coinValueObj = coin:FindFirstChild("Value")
@@ -1080,7 +1170,7 @@ function EnemiesManager.Start(model)
 						local enemyType = slime.Name
 						enemyType = string.gsub(enemyType, "%d+$", "") -- Remove trailing digits
 						enemyType = string.gsub(enemyType, "%s+$", "") -- Remove trailing spaces
-						print("[EnemiesModule] 🎯 Original name:", slime.Name, "| Normalized:", enemyType)
+						--print("[EnemiesModule] 🎯 Original name:", slime.Name, "| Normalized:", enemyType)
 						local matchingQuests = QuestDataStore.GetQuestsByEnemyType(enemyType)
 						
 						if #matchingQuests > 0 then
@@ -1093,7 +1183,7 @@ function EnemiesManager.Start(model)
 								for _, memberPlayer in ipairs(party.members) do
 									if memberPlayer and memberPlayer.Parent and memberPlayer ~= player then
 										table.insert(playersToUpdate, memberPlayer)
-										print("[EnemiesModule] 👥 Added party member", memberPlayer.Name, "to quest progress update")
+										--print("[EnemiesModule] 👥 Added party member", memberPlayer.Name, "to quest progress update")
 									end
 								end
 							end
@@ -1111,9 +1201,7 @@ function EnemiesManager.Start(model)
 												if statusValue and statusValue.Value == "accepted" then
 													-- Use the new function that tracks progress by enemy type for multi-objective quests
 													QuestDataStore.UpdateQuestProgressByEnemyType(targetPlayer, questId, enemyType, 1)
-													print("[EnemiesModule] 📊 Quest", questId, "progress updated for", targetPlayer.Name, "| Enemy:", enemyType)
-													
-													-- Get the quest data to check if all objectives are complete
+												--print("[EnemiesModule] 📊 Quest", questId, "progress updated for", targetPlayer.Name, "| Enemy:", enemyType)
 													local questData = NpcQuestData.GetQuest(questId)
 													if questData and questData.objectives then
 														local allObjectivesComplete = true
@@ -1124,8 +1212,9 @@ function EnemiesManager.Start(model)
 															local objProgressValue = questFolder:FindFirstChild(progressValueName)
 															local currentProgress = objProgressValue and objProgressValue.Value or 0
 															
-															print("[EnemiesModule] 🔍 Quest", questId, "Objective", objectiveIdx, "(", objective.enemyType, "): ", currentProgress, "/", objective.target)
+															--print("[EnemiesModule] 🔍 Quest", questId, "Objective", objectiveIdx, "(", objective.enemyType, "): ", currentProgress, "/", objective.target)
 															
+															-- Check if this objective is not yet complete
 															if currentProgress < objective.target then
 																allObjectivesComplete = false
 																break
@@ -1135,9 +1224,7 @@ function EnemiesManager.Start(model)
 														-- If all objectives complete, mark quest as completed
 														if allObjectivesComplete then
 															statusValue.Value = "completed"
-															print("[EnemiesModule] ✅ Quest", questId, "FULLY COMPLETED for", targetPlayer.Name, "!")
-															
-															-- Get quest data for rewards
+													--print("[EnemiesModule] ✅ Quest", questId, "FULLY COMPLETED for", targetPlayer.Name, "!")
 															local questData = NpcQuestData.GetQuest(questId)
 															if questData and questData.rewards then
 																-- Award experience
@@ -1147,11 +1234,11 @@ function EnemiesManager.Start(model)
 																		local experienceValue = stats:FindFirstChild("Experience")
 																		if experienceValue then
 																			experienceValue.Value = experienceValue.Value + questData.rewards.experience
-																			print("[EnemiesModule] 🎉 Awarded", questData.rewards.experience, "XP for quest completion to", targetPlayer.Name)
+																			--print("[EnemiesModule] 🎉 Awarded", questData.rewards.experience, "XP for quest completion to", targetPlayer.Name)
 																			
 																			-- CRITICAL: Check for level-up after adding quest experience
 																			LevelSystem.checkLevelUp(targetPlayer)
-																			print("[EnemiesModule] 🆙 Level-up check triggered for", targetPlayer.Name)
+																			--print("[EnemiesModule] 🆙 Level-up check triggered for", targetPlayer.Name)
 																		end
 																	end
 																end
@@ -1163,7 +1250,7 @@ function EnemiesManager.Start(model)
 																		local moneyValue = stats:FindFirstChild("Money")
 																		if moneyValue then
 																			moneyValue.Value = moneyValue.Value + questData.rewards.gold
-																			print("[EnemiesModule] 🎉 Awarded", questData.rewards.gold, "Gold for quest completion to", targetPlayer.Name)
+																			--print("[EnemiesModule] 🎉 Awarded", questData.rewards.gold, "Gold for quest completion to", targetPlayer.Name)
 																		end
 																	end
 																end
@@ -1174,26 +1261,26 @@ function EnemiesManager.Start(model)
 																if SFXEvent then
 																	SFXEvent:FireClient(targetPlayer, "LevelUp")
 																end
-																print("[EnemiesModule] 📤 Sent quest completion notification to", targetPlayer.Name)
+																--print("[EnemiesModule] 📤 Sent quest completion notification to", targetPlayer.Name)
 															end
 														else
-															print("[EnemiesModule] ⏳ Quest", questId, "NOT complete yet - waiting for all objectives")
+															--print("[EnemiesModule] ⏳ Quest", questId, "NOT complete yet - waiting for all objectives")
 														end
+														
+														-- Save quest progress to DataStore (async, no force immediate)
+														UnifiedDataStoreManager.SaveQuestData(targetPlayer, false)
+														--print("[EnemiesModule] 💾 Quest progress saved for", targetPlayer.Name)
+														
+														-- Save player experience to DataStore (async, no force immediate)
+														UnifiedDataStoreManager.SaveLevelData(targetPlayer, false)
+														--print("[EnemiesModule] 💾 Player experience saved to DataStore for", targetPlayer.Name)
+														
+														-- Save player money to DataStore (async, no force immediate)
+														UnifiedDataStoreManager.SaveMoney(targetPlayer, false)
+														--print("[EnemiesModule] 💾 Player money saved to DataStore for", targetPlayer.Name)
 													else
-														print("[EnemiesModule] ⚠️ Quest", questId, "has no objectives data!")
+														--print("[EnemiesModule] ⚠️ Quest", questId, "has no objectives data!")
 													end
-													
-													-- Save quest progress to DataStore (async, no force immediate)
-													UnifiedDataStoreManager.SaveQuestData(targetPlayer, false)
-													print("[EnemiesModule] 💾 Quest progress saved for", targetPlayer.Name)
-													
-													-- Save player experience to DataStore (async, no force immediate)
-													UnifiedDataStoreManager.SaveLevelData(targetPlayer, false)
-													print("[EnemiesModule] 💾 Player experience saved to DataStore for", targetPlayer.Name)
-													
-													-- Save player money to DataStore (async, no force immediate)
-													UnifiedDataStoreManager.SaveMoney(targetPlayer, false)
-													print("[EnemiesModule] 💾 Player money saved to DataStore for", targetPlayer.Name)
 												end
 											end
 										end
@@ -1223,19 +1310,10 @@ local function findAndInitializeEnemies(parent)
 	for _, model in ipairs(parent:GetChildren()) do
 		-- Only initialize enemies inside workspace.Enemies
 		if model:IsDescendantOf(EnemiesFolder) or model == EnemiesFolder then
-			local hasHumanoid = model:FindFirstChild("Humanoid") ~= nil
-			local hasRootPart = model:FindFirstChild("HumanoidRootPart") ~= nil
-			if hasHumanoid and hasRootPart then
-				local isPlayer = Players:FindFirstChild(model.Name) and Players:FindFirstChild(model.Name).Character == model
+			if model:IsA("Model") and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
+				local isPlayer = Players:GetPlayerFromCharacter(model) ~= nil
 				if not isPlayer then
-					local humanoid = model:FindFirstChild("Humanoid")
-					if humanoid and humanoid:IsA("Humanoid") then
-						task.spawn(function()
-							if model and model.Parent and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
-								EnemiesManager.Start(model)
-							end
-						end)
-					end
+					task.spawn(EnemiesManager.Start, model)
 				end
 			end
 			findAndInitializeEnemies(model)
@@ -1251,17 +1329,38 @@ end
 Workspace.DescendantAdded:Connect(function(model)
 	-- Only initialize if model is inside workspace.Enemies
 	if not EnemiesFolder or not model:IsDescendantOf(EnemiesFolder) then return end
-	local hasHumanoid = model:FindFirstChild("Humanoid") ~= nil
-	local hasRootPart = model:FindFirstChild("HumanoidRootPart") ~= nil
-	if hasHumanoid and hasRootPart then
-		local isPlayer = Players:FindFirstChild(model.Name) and Players:FindFirstChild(model.Name).Character == model
+	if model:IsA("Model") and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
+		local isPlayer = Players:GetPlayerFromCharacter(model) ~= nil
 		if not isPlayer then
+			task.wait(0.1)
+			task.spawn(EnemiesManager.Start, model)
+		end
+	end
+end)
+
+-- Failsafe: Heartbeat cleanup for stuck dead enemies
+game:GetService("RunService").Heartbeat:Connect(function()
+	local Workspace = game:GetService("Workspace")
+	local EnemiesFolder = Workspace:FindFirstChild("Enemies")
+	if not EnemiesFolder then return end
+	for _, model in ipairs(EnemiesFolder:GetDescendants()) do
+		if model:IsA("Model") and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
 			local humanoid = model:FindFirstChild("Humanoid")
-			if humanoid and humanoid:IsA("Humanoid") then
-				task.wait(0.1)
-				task.spawn(function()
-					if model and model.Parent and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
-						EnemiesManager.Start(model)
+			local health = humanoid and humanoid.Health or 0
+			if health <= 0 and model.Parent then
+				-- Failsafe: forcibly disconnect all connections and destroy the model
+				-- Remove all Touched/TouchEnded connections by cloning and replacing parts
+				for _, part in ipairs(model:GetDescendants()) do
+					if part:IsA("BasePart") then
+						local clone = part:Clone()
+						clone.Parent = part.Parent
+						part:Destroy()
+					end
+				end
+				-- Destroy the model after a short delay to allow part cleanup
+				task.delay(0.2, function()
+					if model and model.Parent then
+						model:Destroy()
 					end
 				end)
 			end

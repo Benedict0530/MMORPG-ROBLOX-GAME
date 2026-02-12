@@ -20,7 +20,8 @@ local DEFAULT_ENEMY_STATS = {
             { itemName = "Brown Armor Helmet", chance = 0.02 }, -- 2% chance
             { itemName = "Brown Armor Suit", chance = 0.01 },   -- 1% chance
             { itemName = "Brown Armor Legs", chance = 0.015 },  -- 1.5% chance
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
+                        
         }
     },
     ["Red Gloop Crusher"] = {
@@ -38,7 +39,7 @@ local DEFAULT_ENEMY_STATS = {
             { itemName = "Iron Armor Helmet", chance = 0.01 },
             { itemName = "Iron Armor Suit", chance = 0.008 },
             { itemName = "Iron Armor Legs", chance = 0.009 },
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
         }
     },
     ["Ice Gloop Crusher"] = {
@@ -55,17 +56,18 @@ local DEFAULT_ENEMY_STATS = {
             { itemName = "Iron Armor Helmet", chance = 0.02 },
             { itemName = "Iron Armor Suit", chance = 0.015 },
             { itemName = "Iron Armor Legs", chance = 0.017 },
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
         }
     },
     ["Giant Gloop Crusher"] = {
-        Health = 1000,
+        Health = 500,
         Attack = 50,
         Experience = 100,
         Money = 100,
         SpawnDelay = 600, -- 10 minutes
         Drops = {
             { itemName = "Grimleaf Sword", chance = 0.01 },  -- 1% chance to drop Grimleaf Sword
+            { itemName = "Osmium Sword", chance = 0.005 },   -- 0.5% chance to drop Osmium Sword
             { itemName = "Iron Sword", chance = 0.5 },
             { itemName = "Wooden Sword", chance = 1},
             { itemName = "Iron Armor Helmet", chance = 0.03 },
@@ -77,17 +79,19 @@ local DEFAULT_ENEMY_STATS = {
             { itemName = "Osmium Armor Helmet", chance = 0.002 },
             { itemName = "Osmium Armor Suit", chance = 0.0015 },
             { itemName = "Osmium Armor Legs", chance = 0.0017 },
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
         }
     },
     ["Red Giant Gloop Crusher"] = {
-        Health = 2000,
+        Health = 1000,
         Attack = 100,
         Experience = 200,
         Money = 200,
         SpawnDelay = 600, -- 10 minutes
         Drops = {
             { itemName = "Grimleaf Sword", chance = 0.5 },  -- 50% chance to drop Grimleaf Sword
+            { itemName = "Red Osmium Sword", chance = 0.002 }, -- 0.2% chance to drop Red Osmium Sword
+            { itemName = "Osmium Sword", chance = 0.01 },      -- 1% chance to drop Osmium Sword
             { itemName = "Iron Sword", chance = 0.75 },
             { itemName = "Plastic Sword", chance = 1},
             { itemName = "Iron Armor Helmet", chance = 0.04 },
@@ -99,17 +103,19 @@ local DEFAULT_ENEMY_STATS = {
             { itemName = "Osmium Armor Helmet", chance = 0.003 },
             { itemName = "Osmium Armor Suit", chance = 0.002 },
             { itemName = "Osmium Armor Legs", chance = 0.0022 },
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
         }
     },
     ["Ice Giant Gloop Crusher"] = {
-        Health = 3000,
+        Health = 1500,
         Attack = 150,
         Experience = 300,
         Money = 300,
         SpawnDelay = 600, -- 10 minutes
         Drops = {
             { itemName = "Grimleaf Sword", chance = 0.75 },  -- 75% chance to drop Grimleaf Sword
+            { itemName = "Red Osmium Sword", chance = 0.005 }, -- 0.5% chance to drop Red Osmium Sword
+            { itemName = "Osmium Sword", chance = 0.02 },      -- 2% chance to drop Osmium Sword
             { itemName = "Iron Sword", chance = 1 },
             { itemName = "Iron Armor Helmet", chance = 0.05 },
             { itemName = "Iron Armor Suit", chance = 0.04 },
@@ -120,7 +126,7 @@ local DEFAULT_ENEMY_STATS = {
             { itemName = "Osmium Armor Helmet", chance = 0.004 },
             { itemName = "Osmium Armor Suit", chance = 0.003 },
             { itemName = "Osmium Armor Legs", chance = 0.0035 },
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
         }
     },
     ["3 Head Green Gloop"] = {
@@ -128,23 +134,25 @@ local DEFAULT_ENEMY_STATS = {
         Attack = 50,
         Experience = 500,
         Money = 500,
-        SpawnDelay = 5, -- 20 minutes
+        SpawnDelay = 120, -- 20 minutes
         Drops = {
-            { itemName = "Grimleaf Sword", chance = 0.75 },
-            { itemName = "Wind Orb", chance = 0.01 },
-            { itemName = "Normal Orb", chance = 0.03 },
-            { itemName = "Fire Orb", chance = 0.02 },
-            { itemName = "Water Orb", chance = 0.02 },
-            { itemName = "Stone Armor Helmet", chance = 0.02 },
-            { itemName = "Stone Armor Suit", chance = 0.018 },
-            { itemName = "Stone Armor Legs", chance = 0.019 },
-            { itemName = "Osmium Armor Helmet", chance = 0.008 },
-            { itemName = "Osmium Armor Suit", chance = 0.007 },
-            { itemName = "Osmium Armor Legs", chance = 0.0075 },
-            { itemName = "Red Osmium Armor Helmet", chance = 0.002 },
-            { itemName = "Red Osmium Armor Suit", chance = 0.0015 },
-            { itemName = "Red Osmium Armor Legs", chance = 0.0017 },
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Grimleaf Sword", chance = 0.9 },
+            { itemName = "Osmium Sword", chance = 0.05 },
+            { itemName = "Red Osmium Sword", chance = 0.02 },
+            { itemName = "Wind Orb", chance = 0.05 },
+            { itemName = "Normal Orb", chance = 0.08 },
+            { itemName = "Fire Orb", chance = 0.06 },
+            { itemName = "Water Orb", chance = 0.06 },
+            { itemName = "Stone Armor Helmet", chance = 0.06 },
+            { itemName = "Stone Armor Suit", chance = 0.05 },
+            { itemName = "Stone Armor Legs", chance = 0.055 },
+            { itemName = "Osmium Armor Helmet", chance = 0.025 },
+            { itemName = "Osmium Armor Suit", chance = 0.02 },
+            { itemName = "Osmium Armor Legs", chance = 0.021 },
+            { itemName = "Red Osmium Armor Helmet", chance = 0.006 },
+            { itemName = "Red Osmium Armor Suit", chance = 0.0045 },
+            { itemName = "Red Osmium Armor Legs", chance = 0.005 },
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
         }
     },
     ["3 Head Red Gloop"] = {
@@ -152,25 +160,27 @@ local DEFAULT_ENEMY_STATS = {
         Attack = 100,
         Experience = 800,
         Money = 800,
-        SpawnDelay = 1200, -- 20 minutes
+        SpawnDelay = 120, -- 20 minutes
         Drops = {
-            { itemName = "Grimleaf Sword", chance = 0.1 },  -- 10% chance to drop Grimleaf Sword
-            { itemName = "Stone Armor Helmet", chance = 0.025 },
-            { itemName = "Stone Armor Suit", chance = 0.022 },
-            { itemName = "Stone Armor Legs", chance = 0.023 },
-            { itemName = "Osmium Armor Helmet", chance = 0.01 },
-            { itemName = "Osmium Armor Suit", chance = 0.009 },
-            { itemName = "Osmium Armor Legs", chance = 0.0095 },
-            { itemName = "Red Osmium Armor Helmet", chance = 0.003 },
-            { itemName = "Red Osmium Armor Suit", chance = 0.0025 },
-            { itemName = "Red Osmium Armor Legs", chance = 0.0027 },
-            { itemName = "Wind Orb", chance = 0.01 },
-            { itemName = "Fire Orb", chance = 0.025 },
-            { itemName = "Water Orb", chance = 0.025 },
-            { itemName = "Earth Orb", chance = 0.02 },
-            { itemName = "Lightning Orb", chance = 0.01 },
-            { itemName = "Dark Orb", chance = 0.008 },
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Grimleaf Sword", chance = 0.3 },
+            { itemName = "Osmium Sword", chance = 0.08 },
+            { itemName = "Red Osmium Sword", chance = 0.04 },
+            { itemName = "Stone Armor Helmet", chance = 0.07 },
+            { itemName = "Stone Armor Suit", chance = 0.06 },
+            { itemName = "Stone Armor Legs", chance = 0.065 },
+            { itemName = "Osmium Armor Helmet", chance = 0.03 },
+            { itemName = "Osmium Armor Suit", chance = 0.027 },
+            { itemName = "Osmium Armor Legs", chance = 0.028 },
+            { itemName = "Red Osmium Armor Helmet", chance = 0.009 },
+            { itemName = "Red Osmium Armor Suit", chance = 0.0075 },
+            { itemName = "Red Osmium Armor Legs", chance = 0.008 },
+            { itemName = "Wind Orb", chance = 0.03 },
+            { itemName = "Fire Orb", chance = 0.07 },
+            { itemName = "Water Orb", chance = 0.07 },
+            { itemName = "Earth Orb", chance = 0.06 },
+            { itemName = "Lightning Orb", chance = 0.03 },
+            { itemName = "Dark Orb", chance = 0.024 },
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
         }
     },
     ["3 Head Ice Gloop"] = {
@@ -178,28 +188,30 @@ local DEFAULT_ENEMY_STATS = {
         Attack = 150,
         Experience = 1200,
         Money = 1200,
-        SpawnDelay = 1200, -- 20 minutes
+        SpawnDelay = 120, -- 20 minutes
         Drops = {
             { itemName = "Grimleaf Sword", chance = 1 },
-            { itemName = "Stone Armor Helmet", chance = 0.03 },
-            { itemName = "Stone Armor Suit", chance = 0.025 },
-            { itemName = "Stone Armor Legs", chance = 0.027 },
-            { itemName = "Osmium Armor Helmet", chance = 0.012 },
-            { itemName = "Osmium Armor Suit", chance = 0.011 },
-            { itemName = "Osmium Armor Legs", chance = 0.0115 },
-            { itemName = "Red Osmium Armor Helmet", chance = 0.004 },
-            { itemName = "Red Osmium Armor Suit", chance = 0.003 },
-            { itemName = "Red Osmium Armor Legs", chance = 0.0035 },
-            { itemName = "Wind Orb", chance = 0.01 },
-            { itemName = "Fire Orb", chance = 0.03 },
-            { itemName = "Water Orb", chance = 0.03 },
-            { itemName = "Earth Orb", chance = 0.025 },
-            { itemName = "Lightning Orb", chance = 0.02 },
-            { itemName = "Dark Orb", chance = 0.015 },
-            { itemName = "Light Orb", chance = 0.01 },
-            { itemName = "Shadow Orb", chance = 0.005 },
-            { itemName = "Radiant Orb", chance = 0.002 },
-            { itemName = "Gloop Spike", chance = 0.05 },  -- 5% chance to drop Gloop Spike
+            { itemName = "Osmium Sword", chance = 0.12 },
+            { itemName = "Red Osmium Sword", chance = 0.08 },
+            { itemName = "Stone Armor Helmet", chance = 0.09 },
+            { itemName = "Stone Armor Suit", chance = 0.08 },
+            { itemName = "Stone Armor Legs", chance = 0.085 },
+            { itemName = "Osmium Armor Helmet", chance = 0.036 },
+            { itemName = "Osmium Armor Suit", chance = 0.033 },
+            { itemName = "Osmium Armor Legs", chance = 0.034 },
+            { itemName = "Red Osmium Armor Helmet", chance = 0.012 },
+            { itemName = "Red Osmium Armor Suit", chance = 0.009 },
+            { itemName = "Red Osmium Armor Legs", chance = 0.01 },
+            { itemName = "Wind Orb", chance = 0.04 },
+            { itemName = "Fire Orb", chance = 0.12 },
+            { itemName = "Water Orb", chance = 0.12 },
+            { itemName = "Earth Orb", chance = 0.1 },
+            { itemName = "Lightning Orb", chance = 0.08 },
+            { itemName = "Dark Orb", chance = 0.06 },
+            { itemName = "Light Orb", chance = 0.04 },
+            { itemName = "Shadow Orb", chance = 0.02 },
+            { itemName = "Radiant Orb", chance = 0.008 },
+            { itemName = "Gloop Spike", chance = 0.001 },  -- 0.1% chance to drop Gloop Spike
         }
     },
     -- Add more enemies here

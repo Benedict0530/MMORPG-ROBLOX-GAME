@@ -17,7 +17,7 @@ local playerActionLock = {}
 
 -- Per-player cooldown to prevent rapid successive actions
 local playerActionCooldown = {}
-local ACTION_COOLDOWN = 0.2 -- 200ms cooldown between actions
+local ACTION_COOLDOWN = 0.05 -- 50ms cooldown between actions
 
 -- Listen for client requests to equip/drop items
 local itemActionEvent = ReplicatedStorage:FindFirstChild("ItemActionEvent")
@@ -43,21 +43,22 @@ function ItemActionHandler:EquipItem(player, itemId)
 		return
 	end
 	playerActionCooldown[player] = tick()
-	
 	-- Block if another action is ongoing for this player
 	if playerActionLock[player] then
 		warn("[ItemActionHandler] Action already in progress for", player.Name, "- blocking EquipItem")
+		playerActionLock[player] = nil -- Always clear lock to prevent stuck state
 		return
 	end
 	playerActionLock[player] = true
 	equipDebounce[player] = equipDebounce[player] or {}
 	if equipDebounce[player][itemId] then
 		-- Already processing this itemId for this player, ignore duplicate
+		equipDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
 		return
 	end
 	equipDebounce[player][itemId] = true
-	print("[ItemActionHandler] EquipItem called for", player.Name, itemId)
+	--print("[ItemActionHandler] EquipItem called for", player.Name, itemId)
 
 	-- Validate itemId exists in player's inventory
 	local item = InventoryManager.GetItemById(player, itemId)
@@ -66,6 +67,41 @@ function ItemActionHandler:EquipItem(player, itemId)
 		equipDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
 		return
+	end
+
+	-- Check if this is a weapon and if there's already a weapon equipped
+	if item.itemType == "weapon" or item.itemType == nil then
+		local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
+		local weaponStats = WeaponData.GetWeaponStats(item.name)
+		
+		-- Check if there's already a weapon equipped
+		local stats = player:FindFirstChild("Stats")
+		if stats then
+			local equippedFolder = stats:FindFirstChild("Equipped")
+			if equippedFolder and equippedFolder:IsA("Folder") then
+				local equippedNameValue = equippedFolder:FindFirstChild("name")
+				local equippedIdValue = equippedFolder:FindFirstChild("id")
+				
+				-- If there's already a weapon equipped and the new weapon is dual-wielded
+				if equippedNameValue and equippedIdValue and equippedNameValue.Value ~= "" and equippedIdValue.Value ~= "" then
+					if weaponStats and weaponStats.type == "Dual-Wielded" then
+						-- Use secondary weapon handler
+						local SecondaryWeaponHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("SecondaryWeaponHandler"))
+						SecondaryWeaponHandler:EquipSecondaryWeapon(player, item.name, item.id)
+						--print("[ItemActionHandler] Equipped as secondary weapon", item.name, "(id:", item.id, ") for", player.Name)
+						
+						-- Clear debounce and lock
+						task.delay(0.05, function()
+							if equipDebounce[player] then
+								equipDebounce[player][itemId] = nil
+							end
+							playerActionLock[player] = nil
+						end)
+						return
+					end
+				end
+			end
+		end
 	end
 
 	-- Only check level requirement for weapons
@@ -83,14 +119,14 @@ function ItemActionHandler:EquipItem(player, itemId)
 		end
 		if playerLevel < requiredLevel then
 			warn("[ItemActionHandler] Player ", player.Name, " does not meet level requirement for ", item.name, ": required=", requiredLevel, ", player=", playerLevel)
-			print("[ItemActionHandler] Firing feedback event to player:", player.Name)
+			--print("[ItemActionHandler] Firing feedback event to player:", player.Name)
 			-- Send feedback to client about level requirement
 			itemFeedbackEvent:FireClient(player, "LevelRequirementNotMet", {
 				itemName = item.name,
 				requiredLevel = requiredLevel,
 				playerLevel = playerLevel
 			})
-			print("[ItemActionHandler] Feedback event fired successfully")
+			--print("[ItemActionHandler] Feedback event fired successfully")
 			equipDebounce[player][itemId] = nil
 			playerActionLock[player] = nil
 			return
@@ -101,7 +137,7 @@ function ItemActionHandler:EquipItem(player, itemId)
 	if item.itemType == "spirit orb" then
 		-- Equip as orb using setEquippedOrb
 		InventoryManager.setEquippedOrb(player, item.name, item.id)
-		print("[ItemActionHandler] Equipped spirit orb", item.name, "(id:", item.id, ") for", player.Name)
+		--print("[ItemActionHandler] Equipped spirit orb", item.name, "(id:", item.id, ") for", player.Name)
 	elseif item.itemType == "armor" then
 		-- Equip as armor using ArmorsManager (update player data only)
 		local ArmorsManager = require(script.Parent.ArmorsManager)
@@ -109,7 +145,7 @@ function ItemActionHandler:EquipItem(player, itemId)
 		local armorInfo = ArmorData[item.name]
 		if armorInfo and armorInfo.Type then
 			ArmorsManager.SetEquippedArmor(player, item.name, item.id)
-			print("[ItemActionHandler] Equipped armor", item.name, "(id:", item.id, ") for", player.Name)
+			--print("[ItemActionHandler] Equipped armor", item.name, "(id:", item.id, ") for", player.Name)
 		else
 			warn("[ItemActionHandler] Armor info not found for", item.name)
 		end
@@ -117,14 +153,14 @@ function ItemActionHandler:EquipItem(player, itemId)
 		-- Equip as weapon using setEquippedWeapon
 		-- NOTE: InventoryManager.setEquippedWeapon fires EquippedChanged event automatically
 		InventoryManager.setEquippedWeapon(player, item.name, item.id)
-		print("[ItemActionHandler] Equipped weapon", item.name, "(id:", item.id, ") for", player.Name)
+		--print("[ItemActionHandler] Equipped weapon", item.name, "(id:", item.id, ") for", player.Name)
 		-- Ensure tool is connected by syncing backpack
 		if player.Character then
 			InventoryManager.SyncBackpack(player, player.Character)
 		end
 	end
 	-- Clear debounce after short delay (allowing for re-equip after a moment)
-	task.delay(0.5, function()
+	task.delay(0.05, function()
 		if equipDebounce[player] then
 			equipDebounce[player][itemId] = nil
 		end
@@ -139,26 +175,39 @@ function ItemActionHandler:DropItem(player, itemId)
 		return
 	end
 	playerActionCooldown[player] = tick()
-	
 	-- Block if another action is ongoing for this player
 	if playerActionLock[player] then
 		warn("[ItemActionHandler] Action already in progress for", player.Name, "- blocking DropItem")
+		playerActionLock[player] = nil -- Always clear lock to prevent stuck state
 		return
 	end
 	playerActionLock[player] = true
-	-- Prevent dropping if the item is currently equipped (check DataStore directly)
-	local DataStoreService = game:GetService("DataStoreService")
-	local statsStore = DataStoreService:GetDataStore("PlayerStats")
+	-- Prevent dropping if the item is currently equipped (check live Stats first, then DataStore as fallback)
 	local equippedIdValue = nil
-	local success, data = pcall(function()
-		return statsStore:GetAsync("Player_" .. tostring(player.UserId))
-	end)
-	if success and data and data.Equipped and type(data.Equipped) == "table" then
-		equippedIdValue = data.Equipped.id
+	local stats = player:FindFirstChild("Stats")
+	if stats then
+		local equipped = stats:FindFirstChild("Equipped")
+		if equipped and equipped:IsA("Folder") then
+			local idValue = equipped:FindFirstChild("id")
+			if idValue and idValue.Value ~= "" then
+				equippedIdValue = idValue.Value
+			end
+		end
 	end
-	print("[ItemActionHandler] Drop attempt: itemId=", tostring(itemId), ", equippedId=", tostring(equippedIdValue))
+	-- If not found in live stats, check DataStore as fallback
+	if not equippedIdValue then
+		local DataStoreService = game:GetService("DataStoreService")
+		local statsStore = DataStoreService:GetDataStore("PlayerStats")
+		local success, data = pcall(function()
+			return statsStore:GetAsync("Player_" .. tostring(player.UserId))
+		end)
+		if success and data and data.Equipped and type(data.Equipped) == "table" then
+			equippedIdValue = data.Equipped.id
+		end
+	end
+	--print("[ItemActionHandler] Drop attempt: itemId=", tostring(itemId), ", equippedId=", tostring(equippedIdValue))
 	if equippedIdValue and tostring(equippedIdValue) == tostring(itemId) then
-		warn("[ItemActionHandler] Cannot drop currently equipped item for", player.Name, itemId, "(checked DataStore)")
+		warn("[ItemActionHandler] Cannot drop currently equipped item for", player.Name, itemId, "(checked live Stats/DataStore)")
 		dropDebounce[player] = dropDebounce[player] or {}
 		dropDebounce[player][itemId] = nil
 		playerActionLock[player] = nil
@@ -172,7 +221,7 @@ function ItemActionHandler:DropItem(player, itemId)
 		return
 	end
 	dropDebounce[player][itemId] = true
-	print("[ItemActionHandler] DropItem called for", player.Name, itemId)
+	--print("[ItemActionHandler] DropItem called for", player.Name, itemId)
 
 	-- Remove item from inventory and save
 	local item = InventoryManager.GetItemById(player, itemId)
@@ -212,13 +261,13 @@ function ItemActionHandler:DropItem(player, itemId)
 	local dropPosition = leftFoot.Position + Vector3.new(0, 0, 0)
 	local spawnedDrop = ItemDropManager.SpawnItemDrop(item.name, dropPosition, player)
 	if spawnedDrop then
-		print("[ItemActionHandler] Dropped", item.name, "(id:", item.id, ") at", tostring(dropPosition))
+		--print("[ItemActionHandler] Dropped", item.name, "(id:", item.id, ") at", tostring(dropPosition))
 	else
 		warn("[ItemActionHandler] Failed to spawn drop for", item.name, "at", tostring(dropPosition))
 	end
 	-- NOTE: InventoryManager.RemoveItem fires InventoryChanged event automatically
 	-- Clear debounce after short delay (allowing for re-drop after a moment)
-	task.delay(0.5, function()
+	task.delay(0.05, function()
 		if dropDebounce[player] then
 			dropDebounce[player][itemId] = nil
 		end
@@ -243,49 +292,76 @@ itemActionEvent.OnServerEvent:Connect(function(player, action, itemId)
 					       ArmorsManager.UnequipAndRemoveAccessory(player, armorInfo.Type)
 				       end
 			       elseif item.itemType == "weapon" or item.itemType == nil then
-				       local WeaponManager = require(script.Parent.WeaponManager)
-				       WeaponManager.UnequipWeapon(player)
-				       elseif item.itemType == "spirit orb" then
-					       -- Unequip orb: robustly remove all orb VFX, particles, and accessories (mimic EquipOrbFromInventory cleanup)
-					       local character = player.Character
-					       if character then
-						       -- Remove all orb accessories
-						       for _, child in ipairs(character:GetChildren()) do
-							       if child:IsA("Accessory") and child.Name:match("[Oo]rb") then
-								       child:Destroy()
-							       end
-						       end
-						       -- Remove all HandVFX and particles from LeftHand
-						       local leftHand = character:FindFirstChild("LeftHand")
-						       if leftHand then
-							       for _, child in ipairs(leftHand:GetChildren()) do
-								       if child:IsA("Model") or child:IsA("Folder") or child:IsA("BasePart") or child:IsA("ParticleEmitter") then
-									       child:Destroy()
-								       end
-							       end
-						       end
-						       -- Remove old slash particles
-						       local upperTorso = character:FindFirstChild("UpperTorso")
-						       if upperTorso then
-							       for _, slashName in ipairs({"Slash1", "Slash2"}) do
-								       local slash = upperTorso:FindFirstChild(slashName)
-								       if slash then
-									       slash:Destroy()
-								       end
-							       end
+				       -- Check if this is primary or secondary weapon
+				       local stats = player:FindFirstChild("Stats")
+				       if stats then
+					       local equippedFolder = stats:FindFirstChild("Equipped")
+					       local secondaryEquippedFolder = stats:FindFirstChild("SecondaryEquipped")
+					       
+					       local isPrimary = false
+					       local isSecondary = false
+					       
+					       if equippedFolder and equippedFolder:IsA("Folder") then
+						       local equippedId = equippedFolder:FindFirstChild("id")
+						       if equippedId and equippedId.Value == itemId then
+							       isPrimary = true
 						       end
 					       end
-					       -- Also clear EquippedOrb slot in stats
-					       local stats = player:FindFirstChild("Stats")
-					       if stats then
-						       local equippedOrb = stats:FindFirstChild("EquippedOrb")
-						       if equippedOrb then
-							       local nameValue = equippedOrb:FindFirstChild("name")
-							       local idValue = equippedOrb:FindFirstChild("id")
-							       if nameValue then nameValue.Value = "" end
-							       if idValue then idValue.Value = "" end
+					       
+					       if secondaryEquippedFolder and secondaryEquippedFolder:IsA("Folder") then
+						       local secondaryEquippedId = secondaryEquippedFolder:FindFirstChild("id")
+						       if secondaryEquippedId and secondaryEquippedId.Value == itemId then
+							       isSecondary = true
 						       end
 					       end
+					       
+					       if isPrimary then
+						       -- Unequipping primary weapon
+						       -- Check if there's a secondary weapon to promote
+						       if secondaryEquippedFolder then
+							       local secondaryName = secondaryEquippedFolder:FindFirstChild("name")
+							       local secondaryId = secondaryEquippedFolder:FindFirstChild("id")
+							       
+							       if secondaryName and secondaryId and secondaryName.Value ~= "" and secondaryId.Value ~= "" then
+								       -- Get secondary weapon info before unequipping
+								       local secondaryWeaponName = secondaryName.Value
+								       local secondaryWeaponId = secondaryId.Value
+								       
+								       -- Unequip secondary first
+							       local SecondaryWeaponHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("SecondaryWeaponHandler"))
+								       SecondaryWeaponHandler:UnequipSecondaryWeapon(player)
+								       
+								       -- Unequip primary
+								       local WeaponManager = require(script.Parent.WeaponManager)
+								       WeaponManager.UnequipWeapon(player)
+								       
+								       -- Equip the secondary as new primary
+								       InventoryManager.setEquippedWeapon(player, secondaryWeaponName, secondaryWeaponId)
+								       --print("[ItemActionHandler] Promoted secondary weapon to primary:", secondaryWeaponName)
+							       else
+								       -- No secondary weapon, just unequip primary
+								       local WeaponManager = require(script.Parent.WeaponManager)
+								       WeaponManager.UnequipWeapon(player)
+							       end
+						       else
+							       -- No secondary weapon folder, just unequip primary
+							       local WeaponManager = require(script.Parent.WeaponManager)
+							       WeaponManager.UnequipWeapon(player)
+						       end
+					       elseif isSecondary then
+						       -- Unequipping secondary weapon - just unequip it
+					       local SecondaryWeaponHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Combat"):WaitForChild("SecondaryWeaponHandler"))
+					       SecondaryWeaponHandler:UnequipSecondaryWeapon(player)
+					       --print("[ItemActionHandler] Unequipped secondary weapon")
+				       else
+						       -- Not equipped as either primary or secondary, ignore
+						       warn("[ItemActionHandler] Weapon not equipped as primary or secondary:", item.name)
+					       end
+				       end
+					       elseif item.itemType == "spirit orb" then
+						       -- Use robust orb unequip logic from OrbSpiritHandler
+						       local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
+						       OrbSpiritHandler.UnequipOrb(player)
 			       end
 		       end
 	else

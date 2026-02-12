@@ -18,7 +18,7 @@ local function createQuestRemoteEvent()
 	local event = Instance.new("RemoteEvent")
 	event.Name = "QuestNpcInteraction"
 	event.Parent = ReplicatedStorage
-	print("[NpcQuestHandler] Created RemoteEvent: QuestNpcInteraction")
+	--print("[NpcQuestHandler] Created RemoteEvent: QuestNpcInteraction")
 	return event
 end
 
@@ -31,7 +31,7 @@ local function createQuestAcceptanceEvent()
 	local event = Instance.new("RemoteEvent")
 	event.Name = "QuestAcceptance"
 	event.Parent = ReplicatedStorage
-	print("[NpcQuestHandler] Created RemoteEvent: QuestAcceptance")
+	--print("[NpcQuestHandler] Created RemoteEvent: QuestAcceptance")
 	return event
 end
 
@@ -57,24 +57,24 @@ end
 -- Function to setup quest NPC with proximity prompt
 local function setupQuestNpc(npc)
 	if npc:FindFirstChild("ProximityPrompt") then
-		print("[NpcQuestHandler] ⚠️ QuestNpc already has ProximityPrompt:", npc.Name)
+		--print("[NpcQuestHandler] ⚠️ QuestNpc already has ProximityPrompt:", npc.Name)
 		return
 	end
 	
 	local mapName = getMapFromNpc(npc)
-	print("[NpcQuestHandler] Found QuestNpc:", npc.Name, "in map:", mapName)
+	--print("[NpcQuestHandler] Found QuestNpc:", npc.Name, "in map:", mapName)
 	
 	-- Debug: Show all children of QuestNpc
-	print("[NpcQuestHandler] QuestNpc children:")
+	--print("[NpcQuestHandler] QuestNpc children:")
 	for _, child in ipairs(npc:GetChildren()) do
-		print("  - " .. child.Name .. " (" .. child.ClassName .. ")")
+		--print("  - " .. child.Name .. " (" .. child.ClassName .. ")")
 	end
 	
 	-- Find or create HumanoidRootPart to attach prompt
 	local rootPart = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChild("Torso")
 	if not rootPart then
-		print("[NpcQuestHandler] ❌ QuestNpc missing HumanoidRootPart/Torso:", npc.Name)
-		print("[NpcQuestHandler] Attaching ProximityPrompt to NPC root instead")
+		--print("[NpcQuestHandler] ❌ QuestNpc missing HumanoidRootPart/Torso:", npc.Name)
+		--print("[NpcQuestHandler] Attaching ProximityPrompt to NPC root instead")
 		rootPart = npc
 	end
 	
@@ -89,11 +89,11 @@ local function setupQuestNpc(npc)
 	proximityPrompt.MaxActivationDistance = 10
 	proximityPrompt.RequiresLineOfSight = false
 	
-	print("[NpcQuestHandler] ✅ ProximityPrompt created on:", promptPart.Name)
+	--print("[NpcQuestHandler] ✅ ProximityPrompt created on:", promptPart.Name)
 	
 	-- Handle interaction
 	proximityPrompt.Triggered:Connect(function(player)
-		print("[NpcQuestHandler] ✅ Player", player.Name, "interacted with QuestNpc in map:", mapName)
+		--print("[NpcQuestHandler] ✅ Player", player.Name, "interacted with QuestNpc in map:", mapName)
 		-- Fire RemoteEvent to client with quest NPC details
 		QuestNpcInteractionEvent:FireClient(player, {
 			npcName = npc.Name,
@@ -104,18 +104,18 @@ local function setupQuestNpc(npc)
 		})
 	end)
 	
-	print("[NpcQuestHandler] ✅ Setup complete for QuestNpc in", mapName)
+	--print("[NpcQuestHandler] ✅ Setup complete for QuestNpc in", mapName)
 end
 
 -- Function to scan all maps for QuestNpc
 local function scanMapsForQuestNpcs()
-	print("[NpcQuestHandler] Scanning maps for QuestNpcs...")
+	--print("[NpcQuestHandler] Scanning maps for QuestNpcs...")
 	local count = 0
 	
 	-- Look in Workspace/Maps folder
 	local mapsFolder = Workspace:FindFirstChild("Maps")
 	if not mapsFolder then
-		print("[NpcQuestHandler] ⚠️ No 'Maps' folder found in Workspace")
+		--print("[NpcQuestHandler] ⚠️ No 'Maps' folder found in Workspace")
 		return
 	end
 	
@@ -129,7 +129,7 @@ local function scanMapsForQuestNpcs()
 		end
 	end
 	
-	print("[NpcQuestHandler] Found and setup", count, "QuestNpcs")
+	--print("[NpcQuestHandler] Found and setup", count, "QuestNpcs")
 end
 
 -- Monitor for new maps being added
@@ -139,7 +139,7 @@ mapsFolder.ChildAdded:Connect(function(child)
 		task.wait(0.5) -- Wait for map to fully load
 		local questNpc = child:FindFirstChild("QuestNpc")
 		if questNpc and questNpc:IsA("Model") then
-			print("[NpcQuestHandler] New map detected:", child.Name)
+			--print("[NpcQuestHandler] New map detected:", child.Name)
 			setupQuestNpc(questNpc)
 		end
 	end
@@ -150,13 +150,13 @@ scanMapsForQuestNpcs()
 
 -- Handle quest acceptance from client
 QuestAcceptanceEvent.OnServerEvent:Connect(function(player, questId)
-	print("[NpcQuestHandler] Player", player.Name, "accepted quest", questId)
+	--print("[NpcQuestHandler] Player", player.Name, "accepted quest", questId)
 	QuestDataStore.AcceptQuest(player, questId)
 	-- Save quest data immediately
 	local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 	UnifiedDataStoreManager.SaveQuestData(player, false)
 end)
 
-print("[NpcQuestHandler] NPC Quest Handler loaded successfully")
+--print("[NpcQuestHandler] NPC Quest Handler loaded successfully")
 
 return NpcQuestHandler

@@ -33,7 +33,7 @@ local function setupButtonAnimation(button, buttonName)
 			originalPosition.Y.Scale, originalPosition.Y.Offset + moveUpDistance.Offset
 		)
 		
-		print("[ButtonAnimateModule] 🎯 Hovering over:", buttonName)
+		--print("[ButtonAnimateModule] 🎯 Hovering over:", buttonName)
 	end)
 	
 	-- Restore on mouse leave
@@ -47,7 +47,7 @@ local function setupButtonAnimation(button, buttonName)
 		-- Animate position back
 		button.Position = originalPosition
 		
-		print("[ButtonAnimateModule] 👋 Left:", buttonName)
+		--print("[ButtonAnimateModule] 👋 Left:", buttonName)
 	end)
 end
 
@@ -67,6 +67,6 @@ function ButtonAnimateModule.SetupButton(button, buttonName)
 	setupButtonAnimation(button, buttonName or "Button")
 end
 
-print("[ButtonAnimateModule] Loaded successfully")
+--print("[ButtonAnimateModule] Loaded successfully")
 
 return ButtonAnimateModule

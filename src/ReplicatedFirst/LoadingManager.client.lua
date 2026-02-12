@@ -28,7 +28,7 @@ local loadingFrame = loadingGui:FindFirstChild("Frame") or loadingGui:FindFirstC
 if loadingFrame then
 	loadingFrame.Visible = true
 else
-	print("[LoadingManager] No Frame/Background found in LoadingGui, GUI structure: " .. table.concat({loadingGui:GetChildren()}, ", "))
+	--print("[LoadingManager] No Frame/Background found in LoadingGui, GUI structure: " .. table.concat({loadingGui:GetChildren()}, ", "))
 end
 
 -- Find the loading percentage label
@@ -473,7 +473,7 @@ animateTo100()
 -- Before hiding the loading screen, break joints and wait for respawn
 local character = player.Character
 if character then
-	print("[LoadingManager] Breaking joints to force respawn...")
+	--print("[LoadingManager] Breaking joints to force respawn...")
 	character:BreakJoints()
 end
 local newCharacter = player.CharacterAdded:Wait()
@@ -482,7 +482,7 @@ while not humanoid do
 	humanoid = newCharacter:FindFirstChild("Humanoid")
 	task.wait(0.05)
 end
-print("[LoadingManager] Respawned and Humanoid found, hiding loading screen.")
+--print("[LoadingManager] Respawned and Humanoid found, hiding loading screen.")
 
 -- Try to fade the loading GUI
 if loadingFrame then

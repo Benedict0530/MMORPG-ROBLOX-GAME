@@ -5,7 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local WeaponData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("WeaponData"))
 local ArmorData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ArmorData"))
-local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("OrbSpiritHandler"))
+local OrbSpiritHandler = require(ServerScriptService:WaitForChild("Library"):WaitForChild("Items"):WaitForChild("OrbSpiritHandler"))
 
 -- Create EnemyDamage RemoteEvent for client notifications
 local damageEvent = ReplicatedStorage:FindFirstChild("EnemyDamage")
@@ -76,7 +76,7 @@ function DamageManager.calculateDamage(player, weaponName, randomFactor)
    local effectiveAttack = math.floor(baseAttack * attackMultiplier)
    local effectiveDefence = math.floor(baseDefence)
    -- Base damage = Weapon Damage × (1 + effectiveAttack/100)
-   local baseDamage = math.floor(weaponDamage * (1 + (effectiveAttack / 100)))
+   local baseDamage = math.floor(weaponDamage * (1 + (effectiveAttack / 50)))
    -- Apply orb multiplier to crit chance: (dexterity / 3) * critChanceMultiplier
    local critChance = (dexterity / CRITICAL_CHANCE_PER_DEX) * critChanceMultiplier
    -- Determine if critical hit
@@ -102,19 +102,19 @@ local disconnectedPlayers = {} -- Track disconnected players
 -- Mark a player as initializing (call when character spawns)
 function DamageManager.MarkPlayerInitializing(player)
 	initializingPlayers[player.UserId] = true
-	print("[DamageManager] Player " .. player.Name .. " marked as initializing")
+	--print("[DamageManager] Player " .. player.Name .. " marked as initializing")
 end
 
 -- Mark a player as fully loaded (call when equipment is equipped)
 function DamageManager.MarkPlayerLoaded(player)
 	initializingPlayers[player.UserId] = nil
-	print("[DamageManager] Player " .. player.Name .. " marked as fully loaded")
+	--print("[DamageManager] Player " .. player.Name .. " marked as fully loaded")
 end
 
 -- Mark a player as disconnected (call when player leaves)
 function DamageManager.MarkPlayerDisconnected(player)
 	disconnectedPlayers[player.UserId] = true
-	print("[DamageManager] Player " .. player.Name .. " marked as disconnected - cannot receive damage")
+	--print("[DamageManager] Player " .. player.Name .. " marked as disconnected - cannot receive damage")
 end
 
 -- Check if player is still initializing
@@ -196,9 +196,11 @@ local function getEquippedArmorDefense(stats)
 	return total
 end
 
--- Defensive Output = sqrt(Defence * ArmorDefence) / 1.5 (diminishing returns)
+-- Defensive Output = sqrt(Defence + ArmorDefence) (diminishing returns)
+-- Defense stat works on its own, armor adds to it
 local function calculateDefensiveOutput(defense, armorDefense)
-	local defensiveOutput = math.sqrt(defense * armorDefense) / 1.5
+	local totalDefense = defense + armorDefense
+	local defensiveOutput = math.sqrt(totalDefense)
 	return defensiveOutput
 end
 
@@ -266,15 +268,21 @@ end
 function DamageManager.DamagePlayer(baseDamage, player, randomFactor)
 	if not player then return 0 end
 	
+	-- Check if player is in SafeZone - skip damage
+	if player:GetAttribute("SafeZone") == true then
+		--print("[DamageManager] Blocked damage to " .. player.Name .. " - player in SafeZone")
+		return 0
+	end
+	
 	-- Check if player is disconnected - skip damage
 	if isPlayerDisconnected(player) then
-		print("[DamageManager] Blocked damage to " .. player.Name .. " - player disconnected")
+		--print("[DamageManager] Blocked damage to " .. player.Name .. " - player disconnected")
 		return 0
 	end
 	
 	-- Check if player is still initializing - skip damage during spawn
 	if isPlayerInitializing(player) then
-		print("[DamageManager] Blocked damage to " .. player.Name .. " - player still initializing")
+		--print("[DamageManager] Blocked damage to " .. player.Name .. " - player still initializing")
 		return 0
 	end
 	
@@ -284,26 +292,26 @@ function DamageManager.DamagePlayer(baseDamage, player, randomFactor)
 	-- Check if player has equipped weapon
 	local equippedFolder = stats:FindFirstChild("Equipped")
 	if not equippedFolder or not equippedFolder:IsA("Folder") then
-		print("[DamageManager] Blocked damage to " .. player.Name .. " - no Equipped folder")
+		--print("[DamageManager] Blocked damage to " .. player.Name .. " - no Equipped folder")
 		return 0
 	end
 	
 	local equippedId = equippedFolder:FindFirstChild("id")
 	if not equippedId or equippedId.Value == "" then
-		print("[DamageManager] Blocked damage to " .. player.Name .. " - no equipped weapon ID")
+		--print("[DamageManager] Blocked damage to " .. player.Name .. " - no equipped weapon ID")
 		return 0
 	end
 	
 	-- Check if player has a character with humanoid
 	if not player.Character or not player.Character:FindFirstChild("Humanoid") then
-		print("[DamageManager] Blocked damage to " .. player.Name .. " - no character or humanoid")
+		--print("[DamageManager] Blocked damage to " .. player.Name .. " - no character or humanoid")
 		return 0
 	end
 	
 	-- Check if player actually has the weapon in their hand (equipped tool in character)
 	local equippedWeaponName = equippedFolder:FindFirstChild("name")
 	if not equippedWeaponName then
-		print("[DamageManager] Blocked damage to " .. player.Name .. " - no weapon name value")
+		--print("[DamageManager] Blocked damage to " .. player.Name .. " - no weapon name value")
 		return 0
 	end
 	
@@ -317,7 +325,7 @@ function DamageManager.DamagePlayer(baseDamage, player, randomFactor)
 	end
 	
 	if not hasEquippedTool then
-		print("[DamageManager] Blocked damage to " .. player.Name .. " - weapon not in character hand")
+		--print("[DamageManager] Blocked damage to " .. player.Name .. " - weapon not in character hand")
 		return 0
 	end
 	

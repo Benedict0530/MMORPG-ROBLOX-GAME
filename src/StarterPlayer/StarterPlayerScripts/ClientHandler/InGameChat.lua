@@ -26,7 +26,7 @@ local function disableChatGUI()
 		end)
 		task.wait()
 	until success
-	print("[InGameChat] ✓ Roblox default chat disabled safely")
+	--print("[InGameChat] ✓ Roblox default chat disabled safely")
 end
 
 disableChatGUI()
@@ -46,13 +46,13 @@ if not chatEvent then
 		error("[InGameChat] Failed to find InGameChatEvent - server handler may not be loaded")
 		return
 	else
-		print("[InGameChat] ✓ InGameChatEvent successfully found after waiting!")
+		--print("[InGameChat] ✓ InGameChatEvent successfully found after waiting!")
 	end
 else
-	print("[InGameChat] ✓ InGameChatEvent found immediately!")
+	--print("[InGameChat] ✓ InGameChatEvent found immediately!")
 end
 
-print("[InGameChat] Found InGameChatEvent: " .. tostring(chatEvent))
+--print("[InGameChat] Found InGameChatEvent: " .. tostring(chatEvent))
 
 -- Wait for broadcast event
 local broadcastEvent = ReplicatedStorage:WaitForChild("ChatBroadcastEvent", 10)
@@ -64,18 +64,18 @@ if not broadcastEvent then
 		return
 	end
 end
-print("[InGameChat] ✓ ChatBroadcastEvent found")
+--print("[InGameChat] ✓ ChatBroadcastEvent found")
 
 -- Create chat UI
 local function createChatUI()
 	-- Main IngameChat container
-	print("[InGameChat] Waiting for GameGui...")
+	--print("[InGameChat] Waiting for GameGui...")
 	local gameGui = playerGui:WaitForChild("GameGui", 10)
 	if not gameGui then
 		warn("[InGameChat] ❌ GameGui not found after 10 seconds - chat system disabled")
 		return
 	end
-	print("[InGameChat] ✓ GameGui found")
+	--print("[InGameChat] ✓ GameGui found")
 	
 	-- Find or create IngameChat frame
 	local ingameChat = gameGui:FindFirstChild("IngameChat")
@@ -91,9 +91,9 @@ local function createChatUI()
 		local corner = Instance.new("UICorner")
 		corner.CornerRadius = UDim.new(0, 8)
 		corner.Parent = ingameChat
-		print("[InGameChat] ✓ IngameChat frame created")
+		--print("[InGameChat] ✓ IngameChat frame created")
 	else
-		print("[InGameChat] ✓ IngameChat frame found (already exists)")
+		--print("[InGameChat] ✓ IngameChat frame found (already exists)")
 	end
 	
 	-- Create or get ScrollingFrame for chat history
@@ -116,7 +116,7 @@ local function createChatUI()
 		listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		listLayout.Parent = scrollingFrame
 		
-		print("[InGameChat] ✓ ScrollingFrame created")
+		--print("[InGameChat] ✓ ScrollingFrame created")
 	end
 	
 	-- Create template TextLabel (hidden)
@@ -145,7 +145,7 @@ local function createChatUI()
 		padding.PaddingTop = UDim.new(0, 4)
 		padding.Parent = templateLabel
 		
-		print("[InGameChat] ✓ ChatMessageTemplate created")
+		--print("[InGameChat] ✓ ChatMessageTemplate created")
 	end
 	
 	-- Create or get TextBox
@@ -170,9 +170,9 @@ local function createChatUI()
 		corner.CornerRadius = UDim.new(0, 6)
 		corner.Parent = textBox
 		
-		print("[InGameChat] ✓ TextBox created and visible")
+		--print("[InGameChat] ✓ TextBox created and visible")
 	else
-		print("[InGameChat] ✓ TextBox found (already exists)")
+		--print("[InGameChat] ✓ TextBox found (already exists)")
 	end
 	
 	-- Function to add message to chat history
@@ -206,7 +206,7 @@ local function createChatUI()
 		-- Auto-scroll to bottom when new message is added
 		scrollingFrame.CanvasPosition = Vector2.new(0, scrollingFrame.CanvasSize.Y.Offset - scrollingFrame.AbsoluteSize.Y)
 		
-		print("[InGameChat] ✓ Message added to scroll: " .. playerName .. ": " .. message .. " (size increase: " .. sizeIncrease .. "px)")
+		--print("[InGameChat] ✓ Message added to scroll: " .. playerName .. ": " .. message .. " (size increase: " .. sizeIncrease .. "px)")
 	end
 	
 	-- Function to send chat message
@@ -218,7 +218,7 @@ local function createChatUI()
 		
 		if textBox.Text ~= "" then
 			local message = textBox.Text
-			print("[InGameChat] ✓ Player submitted text: '" .. message .. "'")
+			--print("[InGameChat] ✓ Player submitted text: '" .. message .. "'")
 			
 			-- Validate message length
 			if #message > 100 then
@@ -226,34 +226,81 @@ local function createChatUI()
 			end
 			
 			-- Send to server (server will broadcast back)
-			print("[InGameChat] Sending message: " .. message)
+			--print("[InGameChat] Sending message: " .. message)
 			chatEvent:FireServer(message)
-			print("[InGameChat] Message sent successfully")
+			--print("[InGameChat] Message sent successfully")
 			
 			-- Clear input
 			textBox.Text = ""
 		else
-			print("[InGameChat] TextBox is empty, not sending")
+			--print("[InGameChat] TextBox is empty, not sending")
 		end
 	end
 	
 	-- Log when textbox gets focus
 	textBox.Focused:Connect(function()
-		print("[InGameChat] ✓ TextBox clicked - ready to type")
+		--print("[InGameChat] ✓ TextBox clicked - ready to type")
 	end)
 	
 	-- Send message when textbox loses focus
 	textBox.FocusLost:Connect(function(enterPressed)
-		print("[InGameChat] TextBox focus lost - enterPressed: " .. tostring(enterPressed))
-		print("[InGameChat] Current text in box: '" .. textBox.Text .. "'")
+		--print("[InGameChat] TextBox focus lost - enterPressed: " .. tostring(enterPressed))
+		--print("[InGameChat] Current text in box: '" .. textBox.Text .. "'")
 		sendMessage()
 	end)
 	
 	-- Listen for broadcast messages from server (all players' chat)
 	broadcastEvent.OnClientEvent:Connect(function(playerName, message)
-		print("[InGameChat] ✓ Received broadcast from " .. playerName .. ": " .. message)
+		--print("[InGameChat] ✓ Received broadcast from " .. playerName .. ": " .. message)
 		addMessageToScroll(playerName, message)
 	end)
+	
+	-- HideShowButton toggle functionality
+	local hideShowButton = ingameChat:FindFirstChild("HideShowButton")
+	if hideShowButton and hideShowButton:IsA("GuiButton") then
+		local isHidden = false
+		local defaultPosition = ingameChat.Position
+		-- Keep button visible (assuming button is ~40px, leave that much showing)
+		local hiddenPosition = UDim2.new(defaultPosition.X.Scale, defaultPosition.X.Offset, 1, -20)
+		
+		-- Image IDs for button states
+		local hiddenImage = "rbxassetid://137574542459191"
+		local shownImage = "rbxassetid://70883524252925"
+		
+		hideShowButton.MouseButton1Click:Connect(function()
+			isHidden = not isHidden
+			
+			if isHidden then
+				-- Slide down (hide)
+				ingameChat:TweenPosition(
+					hiddenPosition,
+					Enum.EasingDirection.Out,
+					Enum.EasingStyle.Quad,
+					0.3,
+					true
+				)
+				-- Change button image to show state (up arrow)
+				hideShowButton.Image = hiddenImage
+				--print("[InGameChat] ✓ Chat hidden")
+			else
+				-- Slide up (show)
+				ingameChat:TweenPosition(
+					defaultPosition,
+					Enum.EasingDirection.Out,
+					Enum.EasingStyle.Quad,
+					0.3,
+					true
+				)
+				-- Change button image to hide state (down arrow)
+				hideShowButton.Image = shownImage
+				--print("[InGameChat] ✓ Chat shown")
+			end
+		end)
+		
+		--print("[InGameChat] ✓ HideShowButton toggle enabled")
+	else
+		warn("[InGameChat] HideShowButton not found in IngameChat frame")
+	end
 	
 	return textBox
 end
@@ -261,6 +308,6 @@ end
 -- Initialize chat UI
 local chatTextBox = createChatUI()
 
-print("[InGameChat] In-game chat system loaded. Type messages and click away to send.")
+--print("[InGameChat] In-game chat system loaded. Type messages and click away to send.")
 
 return InGameChat

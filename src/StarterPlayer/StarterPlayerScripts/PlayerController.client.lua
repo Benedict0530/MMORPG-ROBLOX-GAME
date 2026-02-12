@@ -5,6 +5,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PhysicsService = game:GetService("PhysicsService")
 local WeaponData = require(ReplicatedStorage.Modules.WeaponData)
 local SoundModule = require(ReplicatedStorage.Modules.SoundModule)
 
@@ -12,6 +13,7 @@ local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 
 -- Get ParalysisState from ReplicatedStorage to check if player is paralyzed
 local isParalyzedValue = ReplicatedStorage:FindFirstChild("IsParalyzed")
@@ -60,6 +62,7 @@ local MOVEMENT_STOP_THRESHOLD = 3 -- Velocity needed to STOP walking back to idl
 local lastAttackTimes = {}
 local currentTool = nil
 local isMousePressed = false
+local isDuelActive = false -- Track if player is in a duel
 local isSprinting = false
 local wasSprintingBeforeDash = false
 local attackLoopConnection = nil
@@ -210,7 +213,7 @@ local function performDash()
 
 	-- Check mana (dash costs 2 mana)
 	if not currentMana or currentMana.Value < 2 then
-		print("[PlayerController] Not enough mana to dash (need 2, have " .. (currentMana and currentMana.Value or 0) .. ")")
+		--print("[PlayerController] Not enough mana to dash (need 2, have " .. (currentMana and currentMana.Value or 0) .. ")")
 		return
 	end
 
@@ -218,7 +221,7 @@ local function performDash()
 	isDashing = true
 	-- Store sprint state before dash
 	wasSprintingBeforeDash = isSprinting
-	print("[PlayerController] Dash executed")
+	--print("[PlayerController] Dash executed")
 
 	-- Get or create remote event to tell server to consume mana and play dash sound
 	local performDashEvent = ReplicatedStorage:FindFirstChild("PerformDash")
@@ -248,7 +251,7 @@ local function performDash()
 		local dashTrack = animator:LoadAnimation(dashAnimation)
 		dashTrack:Play()
 		dashTrack:AdjustSpeed(1.5) -- Speed up animation by 1.5x
-		print("[PlayerController] Dash animation playing")
+		--print("[PlayerController] Dash animation playing")
 	end
 
 	-- Raycast during dash to detect obstacles in front cone only
@@ -261,6 +264,28 @@ local function performDash()
 			table.insert(filterInstances, otherPlayer.Character)
 		end
 	end
+	
+	-- Exclude all enemies (both alive and dead) from dash obstacle detection
+	for _, descendant in ipairs(workspace:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			-- Use CollisionGroup property to filter both alive and dead enemies
+			if descendant.CollisionGroup == "Enemies" or descendant.CollisionGroup == "DeadEnemies" then
+				-- Find the top-level model/enemy parent
+				local parent = descendant.Parent
+				while parent and parent ~= workspace do
+					if parent:IsA("Model") then
+						-- Add the enemy model to filter if not already added
+						if not table.find(filterInstances, parent) then
+							table.insert(filterInstances, parent)
+						end
+						break
+					end
+					parent = parent.Parent
+				end
+			end
+		end
+	end
+	
 	raycastParams.FilterDescendantsInstances = filterInstances
 
 	local dashStartTime = tick()
@@ -293,7 +318,7 @@ local function performDash()
 
 				-- Only stop if obstacle is within front cone AND at reasonable height
 				if angleInDegrees <= DETECTION_CONE_ANGLE then
-					print("[PlayerController] Obstacle detected in front cone (" .. angleInDegrees .. "°) - stopping dash")
+					--print("[PlayerController] Obstacle detected in front cone (" .. angleInDegrees .. "°) - stopping dash")
 					bodyVelocity.Velocity = Vector3.new(0, 0, 0) -- Stop momentum
 					dashStoppedEarly = true
 					break
@@ -310,7 +335,7 @@ local function performDash()
 	end
 
 	isDashing = false
-	print("[PlayerController] Dash ended")
+	--print("[PlayerController] Dash ended")
 
 end
 
@@ -337,7 +362,10 @@ local function stopAttackAndRestoreIdle()
 	end
 end
 
-local function performAttack(tool)
+local AttackBridge = require(script.Parent:FindFirstChild("AttackBridge"))
+
+local function performAttack(tool, ignoreDuelBlock)
+	if isDuelActive and not ignoreDuelBlock then return end -- Block all attacks during duel unless override
 	if not tool or not tool.Name then return end
 	if isAnimationInProgress then return end
 	if isParalyzedValue.Value then return end -- Don't attack if paralyzed
@@ -369,7 +397,7 @@ local function performAttack(tool)
 			end
 			local animationLength = track.Length
 			local actualDuration = animationLength - (animationLength / weaponSpeed)
-			print("Playing attack animation with duration: " .. tostring(actualDuration))
+			--print("Playing attack animation with duration: " .. tostring(actualDuration))
 			if attackAnimationConnection then
 				attackAnimationConnection:Disconnect()
 			end
@@ -419,6 +447,11 @@ local function performAttack(tool)
 		isAnimationInProgress = false
 	end
 end
+
+-- Register performAttack for external use (e.g., minigame)
+if AttackBridge then
+	AttackBridge.setPerformAttack(performAttack)
+end
 -- ========== RUN BUTTON SETUP ==========
 local function setupRunButton()
 	local playerGui = player:WaitForChild("PlayerGui")
@@ -452,6 +485,20 @@ local function setupRunButton()
 	end)
 end
 -- ========== ATTACK BUTTON SETUP ==========
+local function setAttackButtonEnabled(enabled)
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then return end
+	local gameGui = playerGui:FindFirstChild("GameGui")
+	if not gameGui then return end
+	local frame = gameGui:FindFirstChild("Frame")
+	if not frame then return end
+	local attackButton = frame:FindFirstChild("AttackButton")
+	if not attackButton then return end
+	attackButton.AutoButtonColor = enabled
+	attackButton.Active = enabled
+	attackButton.Visible = UserInputService.TouchEnabled and enabled
+end
+
 local function setupAttackButton()
 	local playerGui = player:WaitForChild("PlayerGui")
 	local gameGui = playerGui:FindFirstChild("GameGui")
@@ -470,6 +517,11 @@ local function setupAttackButton()
 	end
 	
 	attackButton.MouseButton1Down:Connect(function()
+		if isDuelActive then
+			if attackLoopConnection then attackLoopConnection:Disconnect() attackLoopConnection = nil end
+			isMousePressed = false
+			return
+		end
 		if not currentTool then return end
 		if isMousePressed then return end -- Prevent multiple loops
 		isMousePressed = true
@@ -479,6 +531,7 @@ local function setupAttackButton()
 			attackLoopConnection:Disconnect()
 		end
 		attackLoopConnection = game:GetService("RunService").Heartbeat:Connect(function()
+			if isDuelActive then return end
 			if not isMousePressed or not currentTool then
 				return
 			end
@@ -493,6 +546,11 @@ local function setupAttackButton()
 	end)
 
 	attackButton.MouseButton1Up:Connect(function()
+		if isDuelActive then
+			if attackLoopConnection then attackLoopConnection:Disconnect() attackLoopConnection = nil end
+			isMousePressed = false
+			return
+		end
 		if not isMousePressed then return end
 		isMousePressed = false
 		heldAttackOverride = false
@@ -559,6 +617,11 @@ setupDashButton()
 if not isOnMobile then
 	local mouse = player:GetMouse()
 	mouse.Button1Down:Connect(function()
+		if isDuelActive then
+			if attackLoopConnection then attackLoopConnection:Disconnect() attackLoopConnection = nil end
+			isMousePressed = false
+			return
+		end
 		if not currentTool then return end
 		isMousePressed = true
 		heldAttackOverride = true
@@ -567,6 +630,7 @@ if not isOnMobile then
 			attackLoopConnection:Disconnect()
 		end
 		attackLoopConnection = game:GetService("RunService").Heartbeat:Connect(function()
+			if isDuelActive then return end
 			if not isMousePressed or not currentTool then
 				return
 			end
@@ -581,6 +645,11 @@ if not isOnMobile then
 	end)
 
 	mouse.Button1Up:Connect(function()
+		if isDuelActive then
+			if attackLoopConnection then attackLoopConnection:Disconnect() attackLoopConnection = nil end
+			isMousePressed = false
+			return
+		end
 		isMousePressed = false
 		heldAttackOverride = false
 		attackPressStartTime = 0
@@ -591,6 +660,25 @@ if not isOnMobile then
 		-- Allow current animation to finish naturally
 	end)
 end
+-- ========== DUEL EVENT HANDLING ========== 
+local function setupDuelEventListeners()
+	local duelStartedEvent = ReplicatedStorage:FindFirstChild("DuelStartedEvent")
+	local duelEndedEvent = ReplicatedStorage:FindFirstChild("DuelEndedEvent")
+	if duelStartedEvent then
+		duelStartedEvent.OnClientEvent:Connect(function()
+			isDuelActive = true
+			setAttackButtonEnabled(false)
+		end)
+	end
+	if duelEndedEvent then
+		duelEndedEvent.OnClientEvent:Connect(function()
+			isDuelActive = false
+			setAttackButtonEnabled(true)
+		end)
+	end
+end
+
+setupDuelEventListeners()
 
 -- ========== SPRINT HANDLING ==========
 local lastSprintState = false
@@ -698,7 +786,7 @@ end
 -- Listen for portal touch events from server
 if TeleportGuiEvent then
 	TeleportGuiEvent.OnClientEvent:Connect(function(mapName)
-		print("[PlayerController] Portal touch detected - showing teleport UI for:", mapName)
+		--print("[PlayerController] Portal touch detected - showing teleport UI for:", mapName)
 		showTeleportFadeWithMap(mapName)
 	end)
 end
@@ -791,7 +879,7 @@ end)
 -- Handle animation resume when paralysis ends
 if resumeAnimationEvent then
 	resumeAnimationEvent.OnClientEvent:Connect(function()
-		print("[PlayerController] Resuming animation control after paralysis")
+		--print("[PlayerController] Resuming animation control after paralysis")
 		if currentTool and animator then
 			-- Play idle animation to resume control
 			local idleAnimation = currentTool:FindFirstChild("Idle")
@@ -805,7 +893,7 @@ if resumeAnimationEvent then
 				currentAnimationTrack = idleTrack
 				lastAnimationType = "Idle"
 				isAnimationInProgress = false
-				print("[PlayerController] Idle animation resumed")
+				--print("[PlayerController] Idle animation resumed")
 			end
 		end
 	end)
