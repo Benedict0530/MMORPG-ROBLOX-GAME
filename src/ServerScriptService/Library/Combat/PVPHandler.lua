@@ -195,109 +195,93 @@ function PVPHandler.RaycastPlayerHit(attacker, weaponName, hitEnemies, radius)
 				if not skip then
 					-- Mark as hit
 					hitEnemies[targetPlayer] = true
-				-- Check if target player is still initializing - skip damage during spawn
-				if DamageManager.IsPlayerInitializing(targetPlayer) then
-					--print("[PVPHandler][DEBUG][Proximity] Target player " .. targetPlayer.Name .. " is still initializing, blocking damage")
-					skip = true
-				end
-				
-				-- Check if target has equipped weapon
-				local equippedFolder = targetStats:FindFirstChild("Equipped")
-				if not equippedFolder or not equippedFolder:IsA("Folder") then
-					--print("[PVPHandler][DEBUG][Proximity] Target player has no Equipped folder, blocking damage")
-					skip = true
-				end
-				
-				local equippedId = equippedFolder and equippedFolder:FindFirstChild("id")
-				if not equippedId or equippedId.Value == "" then
-					--print("[PVPHandler][DEBUG][Proximity] Target player has no equipped weapon ID, blocking damage")
-					skip = true
-				end
-				
-				-- Check if target actually has the weapon in their character (equipped tool)
-				if not skip then
-					local equippedWeaponName = equippedFolder:FindFirstChild("name")
-					if equippedWeaponName then
-						local baseWeaponName = equippedWeaponName.Value:match("^([^_]+)") or equippedWeaponName.Value
-						local hasEquippedTool = false
-						for _, tool in ipairs(targetPlayer.Character:GetChildren()) do
-							if tool:IsA("Tool") and tool.Name == baseWeaponName then
-								hasEquippedTool = true
-								break
-							end
-						end
-						
-						if not hasEquippedTool then
-							--print("[PVPHandler][DEBUG][Proximity] Target player has no equipped tool in character, blocking damage")
-							skip = true
-						end
-					else
-						--print("[PVPHandler][DEBUG][Proximity] Target player has no weapon name value, blocking damage")
+
+					-- Check if target player is still initializing - skip damage during spawn
+					if DamageManager.IsPlayerInitializing(targetPlayer) then
 						skip = true
 					end
-				end
-				
-				if skip then
-					-- Remove the hit marker since we're not actually hitting
-					hitEnemies[targetPlayer] = nil
-					return
-				end
-				
-				-- Check if players are dueling each other - if so, allow damage even if in same party
-				local arePlayersDueling = DuelHandler.ArePlayersDueling(attacker.UserId, targetPlayer.UserId)
-				
-				-- Check if both players are in the same party (but skip if they're dueling)
-				if not arePlayersDueling then
-					local attackerPartyId = PartyDataStore.GetPartyId(attacker.UserId)
-					local targetPartyId = PartyDataStore.GetPartyId(targetPlayer.UserId)
-					if attackerPartyId and targetPartyId and attackerPartyId == targetPartyId then
-						--print("[PVPHandler][DEBUG][Proximity] Target player is in the same party as attacker, blocking damage")
+
+					-- Check if target has equipped weapon
+					local equippedFolder = targetStats:FindFirstChild("Equipped")
+					if not equippedFolder or not equippedFolder:IsA("Folder") then
+						skip = true
+					end
+
+					local equippedId = equippedFolder and equippedFolder:FindFirstChild("id")
+					if not equippedId or equippedId.Value == "" then
+						skip = true
+					end
+
+					-- Check if target actually has the weapon in their character (equipped tool)
+					if not skip then
+						local equippedWeaponName = equippedFolder:FindFirstChild("name")
+						if equippedWeaponName then
+							local baseWeaponName = equippedWeaponName.Value:match("^([^_]+)") or equippedWeaponName.Value
+							local hasEquippedTool = false
+							for _, tool in ipairs(targetPlayer.Character:GetChildren()) do
+								if tool:IsA("Tool") and tool.Name == baseWeaponName then
+									hasEquippedTool = true
+									break
+								end
+							end
+							if not hasEquippedTool then
+								skip = true
+							end
+						else
+							skip = true
+						end
+					end
+
+					if skip then
 						hitEnemies[targetPlayer] = nil
 						return
 					end
-				else
-					--print("[PVPHandler][DEBUG][Proximity] Players are dueling - allowing damage despite party membership")
-				end
-				
+
+					-- Check if players are dueling each other - if so, allow damage even if in same party
+					local arePlayersDueling = DuelHandler.ArePlayersDueling(attacker.UserId, targetPlayer.UserId)
+
+					-- Check if both players are in the same party (but skip if they're dueling)
+					if not arePlayersDueling then
+						local attackerPartyId = PartyDataStore.GetPartyId(attacker.UserId)
+						local targetPartyId = PartyDataStore.GetPartyId(targetPlayer.UserId)
+						if attackerPartyId and targetPartyId and attackerPartyId == targetPartyId then
+							hitEnemies[targetPlayer] = nil
+							return
+						end
+					end
+
 					-- Calculate outgoing damage from attacker
 					local outgoingDamage, isCritical = DamageManager.calculateDamage(attacker, weaponName)
-					
 					-- Apply target's defense reduction to get actual damage dealt
 					local actualDamage = DamageManager.CalculateIncomingDamage(outgoingDamage, targetPlayer)
-					
-					--print("[PVPHandler][DEBUG][Proximity] Outgoing damage:", outgoingDamage, "After defense:", actualDamage, "isCritical:", isCritical)
 					local currentHealth = targetStats:FindFirstChild("CurrentHealth")
-					--print("[PVPHandler][DEBUG][Proximity] currentHealth before:", currentHealth and currentHealth.Value)
+
+					-- Duel finishing logic: if this hit would kill during a duel, skip damage and fire DuelFinishingEvent
+					if arePlayersDueling and currentHealth and currentHealth.Value - actualDamage <= 0 then
+						-- Fire duel finishing event instead of applying damage
+						DuelHandler.fireDuelFinishingEvent(attacker.UserId, targetPlayer.UserId)
+						-- Optionally, mark as hit or do any other logic needed
+						return
+					end
 
 					if currentHealth then
 						currentHealth.Value = math.max(0, currentHealth.Value - actualDamage)
-						--print("[PVPHandler][DEBUG][Proximity] currentHealth after:", currentHealth.Value)
-
-						-- Save immediately to DataStore for PVP
 						local UnifiedDataStoreManager = require(ServerScriptService:WaitForChild("Library"):WaitForChild("DataManagement"):WaitForChild("UnifiedDataStoreManager"))
 						UnifiedDataStoreManager.SaveStats(targetPlayer, false)
-
-						-- Handle death
 						if currentHealth.Value <= 0 then
 							local humanoid = targetPlayer.Character and targetPlayer.Character:FindFirstChild("Humanoid")
-							--print("[PVPHandler][DEBUG][Proximity] Player died, humanoid:", humanoid)
 							if humanoid then
 								humanoid:TakeDamage(9999)
 								DamageManager.MarkPlayerInitializing(targetPlayer)
 							end
 						end
-					else
-						--print("[PVPHandler][DEBUG][Proximity] currentHealth stat missing!")
 					end
 
-					-- Fire sound and damage event
 					SoundModule.playSoundByName("Hit", "SFX", false, 1)
 					damageEvent:FireAllClients(targetPlayer.Character, actualDamage, isCritical, false)
 
-				-- Track consecutive hits and apply effects (skip if players are dueling)
-				local arePlayersDueling = DuelHandler.ArePlayersDueling(attacker.UserId, targetPlayer.UserId)
-				
-				if not arePlayersDueling then
+					local arePlayersDueling = DuelHandler.ArePlayersDueling(attacker.UserId, targetPlayer.UserId)
+					if not arePlayersDueling then
 					local hitCount = getAndUpdateHitCount(targetPlayer.UserId)
 					
 					if hitCount == 2 then

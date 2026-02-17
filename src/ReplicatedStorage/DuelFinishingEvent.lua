@@ -1,0 +1,2 @@
+-- DuelFinishingEvent RemoteEvent creation helper (for reference only)
+-- This file is not required to be required anywhere, just a marker for the event name.

@@ -57,6 +57,15 @@ local function setupRemoteEvents()
 		print("[DuelHandler] Created DuelEndedEvent")
 	end
 	
+	-- Event for duel finishing (last hit, for animation)
+	local duelFinishingEvent = ReplicatedStorage:FindFirstChild("DuelFinishingEvent")
+	if not duelFinishingEvent then
+		duelFinishingEvent = Instance.new("RemoteEvent")
+		duelFinishingEvent.Name = "DuelFinishingEvent"
+		duelFinishingEvent.Parent = ReplicatedStorage
+		print("[DuelHandler] Created DuelFinishingEvent")
+	end
+
 	-- Event for player interaction (duel invite)
 	local playerInteractionEvent = ReplicatedStorage:FindFirstChild("PlayerInteractionEvent")
 	if not playerInteractionEvent then
@@ -65,8 +74,154 @@ local function setupRemoteEvents()
 		playerInteractionEvent.Parent = ReplicatedStorage
 		print("[DuelHandler] Created PlayerInteractionEvent")
 	end
-	
-	return duelInvitationEvent, duelResponseFunction, duelStartedEvent, duelEndedEvent, playerInteractionEvent
+
+	-- Event for duel finishing sync (winner triggers, server relays to loser)
+	local duelFinishingSyncEvent = ReplicatedStorage:FindFirstChild("DuelFinishingSyncEvent")
+	if not duelFinishingSyncEvent then
+		duelFinishingSyncEvent = Instance.new("RemoteEvent")
+		duelFinishingSyncEvent.Name = "DuelFinishingSyncEvent"
+		duelFinishingSyncEvent.Parent = ReplicatedStorage
+		print("[DuelHandler] Created DuelFinishingSyncEvent")
+	end
+
+	return duelInvitationEvent, duelResponseFunction, duelStartedEvent, duelEndedEvent, playerInteractionEvent, duelFinishingEvent, duelFinishingSyncEvent
+end
+
+-- Fire DuelFinishingEvent to both duelists
+function DuelHandler.fireDuelFinishingEvent(userId1, userId2)
+	local duelFinishingEvent = ReplicatedStorage:FindFirstChild("DuelFinishingEvent")
+	local ServerStorage = game:GetService("ServerStorage")
+	if duelFinishingEvent then
+		local player1 = Players:GetPlayerByUserId(userId1)
+		local player2 = Players:GetPlayerByUserId(userId2)
+
+		print("[DuelHandler] Fired DuelFinishingEvent to both players (winner/loser flag sent)")
+
+		-- Save equipped weapons before unequipping
+		local equippedWeapons = {} -- [userId] = {primary = id, secondary = id}
+		local function saveAndUnequipWeapons(player)
+			if not player or not player.Character then return end
+			local stats = player:FindFirstChild("Stats")
+			local equipped = stats and stats:FindFirstChild("Equipped")
+			local primaryId = equipped and equipped:FindFirstChild("id") and equipped:FindFirstChild("id").Value or nil
+			local secondaryId = equipped and equipped:FindFirstChild("secondaryId") and equipped:FindFirstChild("secondaryId").Value or nil
+			equippedWeapons[player.UserId] = {primary = primaryId, secondary = secondaryId}
+			-- Unequip logic
+			local WeaponManager = require(script.Parent.Parent.Items.WeaponManager)
+			WeaponManager.UnequipWeapon(player)
+			local SecondaryWeaponHandler = require(script.Parent.Parent.Combat.SecondaryWeaponHandler)
+			if SecondaryWeaponHandler.UnequipSecondaryWeapon then
+				SecondaryWeaponHandler:UnequipSecondaryWeapon(player)
+			end
+			for _, container in ipairs({player.Character, player.Backpack}) do
+				if container then
+					for _, item in ipairs(container:GetChildren()) do
+						if item:IsA("Tool") then
+							item:Destroy()
+						end
+					end
+				end
+			end
+		end
+		saveAndUnequipWeapons(player1)
+		saveAndUnequipWeapons(player2)
+		DuelHandler._lastEquippedWeapons = equippedWeapons
+
+		if player1 and player2 then
+			duelFinishingEvent:FireClient(player1, true, player2.UserId) -- winner gets opponent's userId
+			duelFinishingEvent:FireClient(player2, false, player1.UserId) -- loser gets opponent's userId
+		elseif player1 then
+			duelFinishingEvent:FireClient(player1, true, nil)
+		elseif player2 then
+			duelFinishingEvent:FireClient(player2, false, nil)
+		end
+
+		-- Clone and parent FinishingVFX to the winner, colored by equipped orb
+		if player1 and player1.Character then
+			local finishingVFX = ServerStorage:FindFirstChild("FinishingVFX")
+			if finishingVFX then
+				local vfxClone = finishingVFX:Clone()
+				-- Get orb color
+				local OrbSpiritHandler = require(script.Parent.Parent.Items.OrbSpiritHandler)
+				local orbName = OrbSpiritHandler.GetEquippedOrbName(player1)
+				local orbType = orbName and orbName:match("^(.+)%s+Orb$") or orbName or "Normal"
+				local orbTypeColors = {
+					Fire = Color3.fromRGB(255, 102, 51),
+					Wind = Color3.fromRGB(0, 85, 0),
+					Water = Color3.fromRGB(0, 0, 255),
+					Earth = Color3.fromRGB(83, 28, 0),
+					Shadow = Color3.fromRGB(170, 0, 255),
+					Dark = Color3.fromRGB(0, 0, 0),
+					Light = Color3.fromRGB(255, 255, 255),
+					Radiant = Color3.fromRGB(255, 250, 110),
+					Normal = Color3.fromRGB(255, 255, 255),
+				}
+				local color = orbTypeColors[orbType] or orbTypeColors["Normal"]
+				-- Recursively update all ParticleEmitters in vfxClone
+				local function updateParticles(obj)
+					for _, child in ipairs(obj:GetDescendants()) do
+						if child:IsA("ParticleEmitter") then
+							child.Color = ColorSequence.new(color)
+						end
+					end
+				end
+				updateParticles(vfxClone)
+				vfxClone.Parent = player1.Character
+			end
+		end
+
+		   -- Clone and parent LosingVFX to the loser, colored by the winner's equipped orb
+		   if player2 and player2.Character then
+			   local losingVFX = ServerStorage:FindFirstChild("LosingVFX")
+			   if losingVFX then
+				   local vfxClone = losingVFX:Clone()
+				   -- Get winner's orb color
+				   local OrbSpiritHandler = require(script.Parent.Parent.Items.OrbSpiritHandler)
+				   local orbName = OrbSpiritHandler.GetEquippedOrbName(player1)
+				   local orbType = orbName and orbName:match("^(.+)%s+Orb$") or orbName or "Normal"
+				   local orbTypeColors = {
+					   Fire = Color3.fromRGB(255, 102, 51),
+					   Wind = Color3.fromRGB(0, 85, 0),
+					   Water = Color3.fromRGB(0, 0, 255),
+					   Earth = Color3.fromRGB(83, 28, 0),
+					   Shadow = Color3.fromRGB(170, 0, 255),
+					   Dark = Color3.fromRGB(0, 0, 0),
+					   Light = Color3.fromRGB(255, 255, 255),
+					   Radiant = Color3.fromRGB(255, 250, 110),
+					   Normal = Color3.fromRGB(255, 255, 255),
+				   }
+				   local color = orbTypeColors[orbType] or orbTypeColors["Normal"]
+				   local function updateParticles(obj)
+					   for _, child in ipairs(obj:GetDescendants()) do
+						   if child:IsA("ParticleEmitter") then
+							   child.Color = ColorSequence.new(color)
+						   end
+					   end
+				   end
+				   updateParticles(vfxClone)
+				   vfxClone.Parent = player2.Character
+			   end
+		   end
+
+		if player2 then
+			local info = equippedWeapons[player2.UserId]
+			if info then
+				if info.primary and info.primary ~= "" then
+					local InventoryManager = require(script.Parent.Parent.Items.InventoryManager)
+					InventoryManager.setEquippedWeapon(player2, (info.primary:match("^(.-)_") or info.primary), info.primary)
+				end
+				local SecondaryWeaponHandler = require(script.Parent.Parent.Combat.SecondaryWeaponHandler)
+				if info.secondary and info.secondary ~= "" and SecondaryWeaponHandler.EquipSecondaryWeaponById then
+					pcall(function()
+						SecondaryWeaponHandler:EquipSecondaryWeaponById(player2, info.secondary)
+					end)
+				end
+			end
+		end
+
+	else
+		warn("[DuelHandler] DuelFinishingEvent not found in ReplicatedStorage!")
+	end
 end
 
 -- Check if a player is already in a duel
@@ -285,7 +440,7 @@ local function startDuel(player1, player2)
 	-- Lock damage for both players
 	duelDamageLocked[player1.UserId] = true
 	duelDamageLocked[player2.UserId] = true
-
+	print("[DuelHandler][DEBUG] duelDamageLocked set to true for", player1.UserId, player2.UserId)
 	print("[DuelHandler] Duel started between " .. player1.Name .. " and " .. player2.Name)
 
 	-- Fire DuelStartedEvent for both players so clients can disable attacks
@@ -306,17 +461,23 @@ local function startDuel(player1, player2)
 		countdownEvent.Parent = ReplicatedStorage
 	end
 	task.spawn(function()
-		   for i = 3, 1, -1 do
-			   countdownEvent:FireClient(player1, i)
-			   countdownEvent:FireClient(player2, i)
-			   task.wait(1)
-		   end
-		   countdownEvent:FireClient(player1, "Start")
-		   countdownEvent:FireClient(player2, "Start")
-		   -- Unlock damage after countdown
-		   duelDamageLocked[player1.UserId] = nil
-		   duelDamageLocked[player2.UserId] = nil
-	   end)
+		for i = 3, 1, -1 do
+			countdownEvent:FireClient(player1, i)
+			countdownEvent:FireClient(player2, i)
+			task.wait(1)
+		end
+		countdownEvent:FireClient(player1, "Start")
+		countdownEvent:FireClient(player2, "Start")
+
+		-- Double-check both players are still in a duel before unlocking damage
+		if activeDuels[player1.UserId] == player2.UserId and activeDuels[player2.UserId] == player1.UserId then
+			duelDamageLocked[player1.UserId] = false
+			duelDamageLocked[player2.UserId] = false
+			print("[DuelHandler][DEBUG] duelDamageLocked set to false for", player1.UserId, player2.UserId)
+		else
+			print("[DuelHandler][DEBUG] Players not in duel at countdown end. Not unlocking damage.")
+		end
+	end)
 
 	   return true
 end
@@ -333,22 +494,56 @@ function DuelHandler.EndDuel(player1UserId, player2UserId, winnerId, reason)
 	local player1 = Players:GetPlayerByUserId(player1UserId)
 	local player2 = Players:GetPlayerByUserId(player2UserId)
 	
-	-- Unanchor both players' HumanoidRootParts
-	if player1 and player1.Character then
-		local root1 = player1.Character:FindFirstChild("HumanoidRootPart")
-		if root1 then
-			root1.Anchored = false
-			print("[DuelHandler] Unanchored " .. player1.Name)
+	-- Unanchor, reset stats, destroy VFX, and restore ragdoll (respawn) for both players
+	local function resetPlayerState(player)
+		if not player then return end
+		local char = player.Character
+		local needsRespawn = false
+		if char then
+			local root = char:FindFirstChild("HumanoidRootPart")
+			if root then
+				root.Anchored = false
+				print("[DuelHandler] Unanchored " .. player.Name)
+			end
+			-- If character has no Humanoid or is missing joints, respawn
+			local humanoid = char:FindFirstChildOfClass("Humanoid")
+			if not humanoid or humanoid.Health <= 0 or not char:FindFirstChild("Head") or not char:FindFirstChild("HumanoidRootPart") then
+				needsRespawn = true
+			end
+			-- Destroy FinishingVFX if present
+			local vfx = char:FindFirstChild("FinishingVFX")
+			if vfx then
+				vfx:Destroy()
+				print("[DuelHandler] Destroyed FinishingVFX for " .. player.Name)
+			end
+		end
+		-- Reset stats for default PVP
+		if player:FindFirstChild("Stats") then
+			local stats = player.Stats
+			if stats:FindFirstChild("DuelState") then
+				stats.DuelState.Value = false
+				print("[DuelHandler] Reset DuelState for " .. player.Name)
+			end
+			if stats:FindFirstChild("DuelOpponent") then
+				stats.DuelOpponent.Value = ""
+				print("[DuelHandler] Reset DuelOpponent for " .. player.Name)
+			end
+			-- Add more stat resets here as needed
+		end
+		-- If ragdolled, respawn the player
+		if needsRespawn then
+			print("[DuelHandler] Respawning player after ragdoll:", player.Name)
+			player:LoadCharacter()
+			-- Clear initializing flag after respawn so PVP works
+			local DamageManager = require(script.Parent.Parent.Combat.DamageManager)
+			player.CharacterAdded:Once(function()
+				task.wait(0.1)
+				DamageManager.ClearPlayerInitializing(player)
+			end)
 		end
 	end
-	
-	if player2 and player2.Character then
-		local root2 = player2.Character:FindFirstChild("HumanoidRootPart")
-		if root2 then
-			root2.Anchored = false
-			print("[DuelHandler] Unanchored " .. player2.Name)
-		end
-	end
+	resetPlayerState(player1)
+	resetPlayerState(player2)
 	
 	if player1 and player2 then
 		print("[DuelHandler] Duel ended between " .. player1.Name .. " and " .. player2.Name)
@@ -378,13 +573,43 @@ function DuelHandler.EndDuel(player1UserId, player2UserId, winnerId, reason)
 			duelEndedEvent:FireClient(player2, winnerId, reason)
 			print("[DuelHandler] Notified both players of duel end (reason: " .. tostring(reason) .. ")")
 		end
+	task.delay(2.5, function()
+		-- Only re-equip the winner's weapons, not the loser's, for safety
+	local equippedWeapons = DuelHandler._lastEquippedWeapons or {}
+	if winnerId then
+		local winnerPlayer = Players:GetPlayerByUserId(winnerId)
+		local info = equippedWeapons[winnerId]
+		if winnerPlayer and info then
+			print("[DuelHandler][DEBUG] Re-equipping weapons for winner:", winnerPlayer.Name, "primary:", info.primary, "secondary:", info.secondary)
+			if info.primary and info.primary ~= "" then
+				local InventoryManager = require(script.Parent.Parent.Items.InventoryManager)
+				InventoryManager.setEquippedWeapon(winnerPlayer, (info.primary:match("^(.-)_") or info.primary), info.primary)
+				print("[DuelHandler][DEBUG] Primary weapon re-equipped for", winnerPlayer.Name, info.primary)
+			end
+			local SecondaryWeaponHandler = require(script.Parent.Parent.Combat.SecondaryWeaponHandler)
+			if info.secondary and info.secondary ~= "" and SecondaryWeaponHandler.EquipSecondaryWeaponById then
+				local ok, err = pcall(function()
+					SecondaryWeaponHandler:EquipSecondaryWeaponById(winnerPlayer, info.secondary)
+				end)
+				if not ok then
+					warn("[DuelHandler][DEBUG] Failed to re-equip secondary weapon:", err)
+				else
+					print("[DuelHandler][DEBUG] Secondary weapon re-equipped for", winnerPlayer.Name)
+				end
+			end
+		end
+	end
+	DuelHandler._lastEquippedWeapons = nil
+	end)
 	end
 end
 
 -- Check if two players are dueling each other
 -- Check if a player's damage is locked due to duel countdown
 function DuelHandler.IsDuelDamageLocked(userId)
-	return duelDamageLocked[userId] and true or false
+    local locked = duelDamageLocked[userId]
+    print("[DuelHandler][DEBUG] IsDuelDamageLocked for userId", userId, "=", tostring(locked))
+    return locked == true
 end
 function DuelHandler.ArePlayersDueling(player1UserId, player2UserId)
 	return activeDuels[player1UserId] == player2UserId
@@ -459,7 +684,7 @@ function DuelHandler.Initialize()
 	print("[DuelHandler] 🔧 Initializing DuelHandler...")
 	
 	-- Setup remote events
-	local duelInvitationEvent, duelResponseFunction, duelStartedEvent, duelEndedEvent, playerInteractionEvent = setupRemoteEvents()
+	local duelInvitationEvent, duelResponseFunction, duelStartedEvent, duelEndedEvent, playerInteractionEvent, duelFinishingEvent, duelFinishingSyncEvent = setupRemoteEvents()
 	
 	print("[DuelHandler] ✅ Remote events setup complete")
 	print("[DuelHandler] - DuelInvitationEvent:", duelInvitationEvent and "FOUND" or "NOT FOUND")
@@ -482,8 +707,44 @@ function DuelHandler.Initialize()
 			print("[DuelHandler] ℹ️ Not a Duel Invite, ignoring (type: " .. tostring(interactionType) .. ")")
 		end
 	end)
-	
+
 	print("[DuelHandler] ✅ PlayerInteractionEvent listener connected")
+
+	-- Listen for DuelFinishingSyncEvent from winner and relay to loser
+	duelFinishingSyncEvent.OnServerEvent:Connect(function(winnerPlayer, opponentUserId)
+		print("[DuelHandler][FinishingSync] Received from winner:", winnerPlayer and winnerPlayer.Name, "for opponentUserId:", opponentUserId)
+		if not opponentUserId then print("[DuelHandler][FinishingSync] opponentUserId is nil!") return end
+		local loserPlayer = Players:GetPlayerByUserId(opponentUserId)
+		print("[DuelHandler][FinishingSync] loserPlayer:", loserPlayer and loserPlayer.Name or "nil")
+		if loserPlayer and loserPlayer.Character then
+			print("[DuelHandler][FinishingSync] Relaying to loser:", loserPlayer.Name)
+			-- Unanchor root and apply knockback
+			local rootPart = loserPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if rootPart then
+				rootPart.Anchored = false
+				local backward = -rootPart.CFrame.LookVector
+				local bodyVelocity = Instance.new("BodyVelocity")
+				bodyVelocity.Velocity = backward * 60 + Vector3.new(0, 30, 0)
+				bodyVelocity.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+				bodyVelocity.P = 1e4
+				bodyVelocity.Parent = rootPart
+				game:GetService("Debris"):AddItem(bodyVelocity, 0.5)
+				task.delay(0.5, function()
+					if loserPlayer.Character and loserPlayer.Character.Parent then
+						-- Set health to 0 to ensure death event triggers
+						local humanoid = loserPlayer.Character:FindFirstChildOfClass("Humanoid")
+						if humanoid and humanoid.Health > 0 then
+							humanoid.Health = 0
+						end
+						loserPlayer.Character:BreakJoints()
+					end
+				end)
+			end
+			duelFinishingSyncEvent:FireClient(loserPlayer)
+		else
+			print("[DuelHandler][FinishingSync] Loser player not found for userId:", opponentUserId)
+		end
+	end)
 	
 	-- Handle duel responses
 	duelResponseFunction.OnServerInvoke = function(player, inviterPlayer, response)

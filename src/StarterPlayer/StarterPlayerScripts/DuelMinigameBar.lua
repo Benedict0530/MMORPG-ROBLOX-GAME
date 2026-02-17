@@ -15,37 +15,56 @@ local BAR_MOVE_TIME_DEFAULT = 1.5 -- initial seconds for bar to move left to rig
 local BAR_MOVE_TIME_MIN = 0.6 -- minimum speed
 local BAR_MOVE_TIME_DECAY = 0.08 -- how much to speed up per round
 
-function module.CreateBar(parent, onResult, roundNum)
-	       local screenGui = Instance.new("ScreenGui")
-	       screenGui.Name = "DuelMinigameBarGui"
-	       screenGui.ResetOnSpawn = false
-	       screenGui.Parent = parent
 
-	       local barFrame = Instance.new("Frame")
-	       barFrame.Name = "BarFrame"
-	       barFrame.Size = UDim2.new(0, BAR_WIDTH, 0, BAR_HEIGHT)
-	       barFrame.Position = UDim2.new(0.5, -BAR_WIDTH/2, 0.8, 0)
-	       barFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-	       barFrame.BorderSizePixel = 0
-	       barFrame.Parent = screenGui
+-- safeZoneLeftOverride: if provided, use this for safe zone position (for sync between clients)
+function module.CreateBar(parent, onResult, roundNum, safeZoneLeftOverride)
+	   local screenGui = Instance.new("ScreenGui")
+	   screenGui.Name = "DuelMinigameBarGui"
+	   screenGui.ResetOnSpawn = false
+	   screenGui.Parent = parent
 
-	       -- Randomize safe zone position
-	       local safeZoneLeft = math.random(0, BAR_WIDTH - SAFEZONE_WIDTH)
-	       local safeZone = Instance.new("Frame")
-	       safeZone.Name = "SafeZone"
-	       safeZone.Size = UDim2.new(0, SAFEZONE_WIDTH, 1, 0)
-	       safeZone.Position = UDim2.new(0, safeZoneLeft, 0, 0)
-	       safeZone.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-	       safeZone.BorderSizePixel = 0
-	       safeZone.Parent = barFrame
+	local barFrame = Instance.new("Frame")
+	barFrame.Name = "BarFrame"
+	barFrame.Size = UDim2.new(0, BAR_WIDTH, 0, BAR_HEIGHT)
+	barFrame.Position = UDim2.new(0.5, -BAR_WIDTH/2, 0.8, 0)
+	barFrame.BackgroundColor3 = Color3.fromRGB(60, 60, 60) -- more neutral, less strong
+	barFrame.BorderSizePixel = 0
+	-- Add corner radius
+	local barCorner = Instance.new("UICorner")
+	barCorner.CornerRadius = UDim.new(0, 12)
+	barCorner.Parent = barFrame
+	barFrame.Parent = screenGui
 
-	       local marker = Instance.new("Frame")
-	       marker.Name = "Marker"
-	       marker.Size = UDim2.new(0, 10, 1, 0)
-	       marker.Position = UDim2.new(0, 0, 0, 0)
-	       marker.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-	       marker.BorderSizePixel = 0
-	       marker.Parent = barFrame
+	   -- Use provided safeZoneLeftOverride if given, else randomize
+	   local safeZoneLeft
+	   if typeof(safeZoneLeftOverride) == "number" then
+		   safeZoneLeft = safeZoneLeftOverride
+	   else
+		   safeZoneLeft = math.random(0, BAR_WIDTH - SAFEZONE_WIDTH)
+	   end
+	local safeZone = Instance.new("Frame")
+	safeZone.Name = "SafeZone"
+	safeZone.Size = UDim2.new(0, SAFEZONE_WIDTH, 1, 0)
+	safeZone.Position = UDim2.new(0, safeZoneLeft, 0, 0)
+	safeZone.BackgroundColor3 = Color3.fromRGB(120, 200, 120) -- softer green
+	safeZone.BorderSizePixel = 0
+	-- Add corner radius
+	local safeZoneCorner = Instance.new("UICorner")
+	safeZoneCorner.CornerRadius = UDim.new(0, 10)
+	safeZoneCorner.Parent = safeZone
+	safeZone.Parent = barFrame
+
+		local marker = Instance.new("Frame")
+		marker.Name = "Marker"
+		marker.Size = UDim2.new(0, 10, 1, 0)
+		marker.Position = UDim2.new(0, 0, 0, 0)
+		marker.BackgroundColor3 = Color3.fromRGB(200, 100, 100) -- softer red
+		marker.BorderSizePixel = 0
+		-- Add corner radius
+		local markerCorner = Instance.new("UICorner")
+		markerCorner.CornerRadius = UDim.new(0, 5)
+		markerCorner.Parent = marker
+		marker.Parent = barFrame
 
 	       local tapped = false
 	       local tapTime = nil
@@ -65,7 +84,8 @@ function module.CreateBar(parent, onResult, roundNum)
 		       local safeLeft = safeZoneLeft
 		       local safeRight = safeZoneLeft + SAFEZONE_WIDTH
 		       local result = "Miss"
-		       if markerCenter >= safeLeft and markerCenter <= safeRight then
+		       -- Only count as Safe if markerCenter is strictly inside the safezone and not at the very end
+		       if markerCenter > safeLeft and markerCenter < safeRight then
 			       result = "Safe"
 		       end
 		       if onResult then onResult(result, markerCenter, safeLeft, safeRight) end
@@ -95,11 +115,20 @@ function module.CreateBar(parent, onResult, roundNum)
 	       marker.Position = UDim2.new(0, 0, 0, 0)
 	       markerTween = TweenService:Create(marker, TweenInfo.new(barMoveTime, Enum.EasingStyle.Linear), {Position = UDim2.new(1, -10, 0, 0)})
 	       markerTween:Play()
-	       markerTween.Completed:Connect(function()
-		       if not tapped then
-			       onTap()
-		       end
-	       end)
+		       markerTween.Completed:Connect(function()
+			       if not tapped then
+				       -- If the marker reaches the end without a tap, always count as Miss
+				       tapped = true
+				       if markerTween then markerTween:Cancel() end
+				       local markerX = marker.Position.X.Scale * BAR_WIDTH + marker.Position.X.Offset
+				       local markerCenter = markerX + 5
+				       local safeLeft = safeZoneLeft
+				       local safeRight = safeZoneLeft + SAFEZONE_WIDTH
+				       local result = "Miss"
+				       if onResult then onResult(result, markerCenter, safeLeft, safeRight) end
+				       screenGui:Destroy()
+			       end
+		       end)
 
 		return screenGui
 	end
